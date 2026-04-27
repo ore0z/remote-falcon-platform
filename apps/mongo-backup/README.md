@@ -1,54 +1,54 @@
-# remote-falcon-mongo-backup
+# Remote Falcon Mongo Backup
 
-This project uses Quarkus, the Supersonic Subatomic Java Framework.
+Scheduled MongoDB backup service. Dumps the platform's Mongo database and pushes it to DigitalOcean Spaces (S3-compatible). The only thing standing between a Mongo failure and total data loss.
 
-If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
+| | |
+|---|---|
+| **Stack** | Quarkus, Java 21 GraalVM **native image** |
+| **Container port** | 8080 |
+| **Replicas** | 1 |
+| **Ingress** | `remotefalcon.com`, path prefix `/remote-falcon-mongo-backup` (forwarded headers enabled — used to trigger backups manually via authenticated POST) |
+| **Health probe** | `GET /remote-falcon-mongo-backup/q/health{,/live,/ready}` |
+| **Talks to** | MongoDB (read), DigitalOcean Spaces (write) |
 
-## Running the application in dev mode
+## What it does
 
-You can run your application in dev mode that enables live coding using:
+- Runs **scheduled `mongodump`-equivalent backups** of the `remote-falcon` Mongo database
+- Streams the output to **DigitalOcean Spaces** (S3-compatible) under a dated key prefix
+- Exposes a **trigger endpoint** for manual / on-demand backups, gated by `BACKUP_AUTH_TOKEN`
+- Logs each run; failure paths surface via OpenTelemetry → Datadog/Grafana (when wired)
 
-```shell script
-./gradlew quarkusDev
+## Why this service is critical
+
+Silent backup failure is **the only data-loss bug class in the stack** that's also genuinely irreversible. If `mongodump` fails or S3 PutObject silently 4xx's and nobody notices, the next time Mongo loses data there's nothing to restore from.
+
+This service has **zero tests today**. The 276-LOC `MongoBackupService` is the highest-leverage untested code in the entire platform — covered as Phase C3.1 in [`CONSOLIDATION-PLAN.md`](../../docs/CONSOLIDATION-PLAN.md). Alerts on "backup not run in last 36 hours" and "S3 PutObject failed" are explicit asks in [`OBSERVABILITY-PLAN.md`](../../docs/OBSERVABILITY-PLAN.md).
+
+## Configuration
+
+Build-time:
+- `MONGO_URI` (build-arg, baked into native image)
+- `OTEL_URI` (build-arg)
+
+Runtime (in-cluster Secrets):
+- `mongodb-connection` → `MONGO_URI`
+- `do-s3` → `AWS_ACCESS_KEY_ID`, `AWS_REGION`, `AWS_SECRET_ACCESS_KEY`
+- `mongo-backup-auth-token` → `BACKUP_AUTH_TOKEN`
+
+## Local development
+
+```bash
+./gradlew quarkusDev    # http://localhost:8080
 ```
 
-> **_NOTE:_**  Quarkus now ships with a Dev UI, which is available in dev mode only at <http://localhost:8080/q/dev/>.
+Requires Mongo and (for full path coverage) S3-compatible credentials. LocalStack works for local S3.
 
-## Packaging and running the application
+## Testing
 
-The application can be packaged using:
+- **Today:** zero tests
+- **Planned (Phase C3.1):** `MongoBackupServiceTest` with testcontainers Mongo + LocalStack S3. Asserts dump key format, S3 PutObject is called with the right bucket, retention/cleanup logic deletes old backups, failure paths log/alert. ~3 days of work — *highest-impact single test in the stack.*
 
-```shell script
-./gradlew build
-```
+## Key files
 
-It produces the `quarkus-run.jar` file in the `build/quarkus-app/` directory.
-Be aware that it’s not an _über-jar_ as the dependencies are copied into the `build/quarkus-app/lib/` directory.
-
-The application is now runnable using `java -jar build/quarkus-app/quarkus-run.jar`.
-
-If you want to build an _über-jar_, execute the following command:
-
-```shell script
-./gradlew build -Dquarkus.package.jar.type=uber-jar
-```
-
-The application, packaged as an _über-jar_, is now runnable using `java -jar build/*-runner.jar`.
-
-## Creating a native executable
-
-You can create a native executable using:
-
-```shell script
-./gradlew build -Dquarkus.native.enabled=true
-```
-
-Or, if you don't have GraalVM installed, you can run the native executable build in a container using:
-
-```shell script
-./gradlew build -Dquarkus.native.enabled=true -Dquarkus.native.container-build=true
-```
-
-You can then execute your native executable with: `./build/remote-falcon-mongo-backup-1.0.0-runner`
-
-If you want to learn more about building native executables, please consult <https://quarkus.io/guides/gradle-tooling>.
+- `src/main/java/com/remotefalcon/.../MongoBackupService.java` — dump + upload + retention logic (276 LOC)
+- `src/main/java/com/remotefalcon/.../resource/` — manual-trigger HTTP endpoint

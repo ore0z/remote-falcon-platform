@@ -1,60 +1,59 @@
-# remote-falcon-account-archive
+# Remote Falcon Account Archive
 
-This project uses Quarkus, the Supersonic Subatomic Java Framework.
+Scheduled cleanup service that **archives stale show accounts** out of the live database, and **deletes unverified signups** that never confirmed their email. Two separate `@Scheduled` jobs in one service.
 
-If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
+| | |
+|---|---|
+| **Stack** | Quarkus, Java 21 GraalVM **native image** |
+| **Container port** | 8080 |
+| **Replicas** | 1 |
+| **Ingress** | none — internal `ClusterIP` Service only |
+| **Health probe** | `GET /remote-falcon-account-archive/q/health{,/live,/ready}` |
+| **Talks to** | MongoDB |
 
-## Running the application in dev mode
+## What it does
 
-You can run your application in dev mode that enables live coding using:
+Two `@Scheduled(every = "24h")` jobs in [`AccountArchiveService.java`](src/main/java/com/remotefalcon/service/AccountArchiveService.java):
 
-```shell script
-./gradlew quarkusDev
+### 1. `archiveAccounts()`
+- Finds shows where `lastLoginDate < now - 24 months` **OR `lastLoginDate is null`**
+- For each match: serializes the `Show` document to JSON, inserts it into a separate Mongo database `remote-falcon-archive` → collection `show`, and **only if the insert is acknowledged**, deletes the original from the live `remote-falcon` database
+- Copy-then-delete archive, not a soft-delete
+
+### 2. `deleteUnverifiedShows()`
+- Finds shows where `emailVerified = false AND createdDate < now - 7 days`
+- **Hard-deletes** them — no archive copy
+- Cleans up signups that never confirmed their email
+
+Both run on a 24h tick from process-start time (Quarkus `@Scheduled` uses elapsed-time scheduling, not cron-aligned), and both run on every pod restart.
+
+## Why this service needs careful testing
+
+This service **deletes customer data**. The cutoff predicate is one line:
+
+```java
+list("lastLoginDate < ?1 or lastLoginDate is null", LocalDate.now().minusMonths(24).atStartOfDay())
 ```
 
-> **_NOTE:_**  Quarkus now ships with a Dev UI, which is available in dev mode only at <http://localhost:8080/q/dev/>.
+Any show document missing the `lastLoginDate` field — including freshly-migrated accounts or future schema variants — matches the archive criterion. The 7-day unverified filter is the only thing protecting brand-new signups from getting swept by the 24-month archive query the moment they hit the DB.
 
-## Packaging and running the application
+Today: **zero tests.** Covered as Phase C3.2 in [`CONSOLIDATION-PLAN.md`](../../docs/CONSOLIDATION-PLAN.md) — Mockito tests for the cutoff predicate, "don't archive recent activity," and empty-result handling.
 
-The application can be packaged using:
+## Configuration
 
-```shell script
-./gradlew build
+- `MONGO_URI` — connection string (no build-arg baking on this service; runtime env via Secret `mongodb-connection`)
+- `OTEL_URI` — OTLP endpoint
+- `quarkus.mongodb.database` — `remote-falcon` (archive target hardcoded as `remote-falcon-archive`)
+
+## Local development
+
+```bash
+./gradlew quarkusDev    # http://localhost:8080
 ```
 
-It produces the `quarkus-run.jar` file in the `build/quarkus-app/` directory.
-Be aware that it’s not an _über-jar_ as the dependencies are copied into the `build/quarkus-app/lib/` directory.
+Requires a Mongo instance. The workspace `dev-up.sh` provides one. The schedulers will start ticking immediately — be careful pointing this at any database with real data.
 
-The application is now runnable using `java -jar build/quarkus-app/quarkus-run.jar`.
+## Key files
 
-If you want to build an _über-jar_, execute the following command:
-
-```shell script
-./gradlew build -Dquarkus.package.jar.type=uber-jar
-```
-
-The application, packaged as an _über-jar_, is now runnable using `java -jar build/*-runner.jar`.
-
-## Creating a native executable
-
-You can create a native executable using:
-
-```shell script
-./gradlew build -Dquarkus.native.enabled=true
-```
-
-Or, if you don't have GraalVM installed, you can run the native executable build in a container using:
-
-```shell script
-./gradlew build -Dquarkus.native.enabled=true -Dquarkus.native.container-build=true
-```
-
-You can then execute your native executable with: `./build/remote-falcon-account-archive-1.0-SNAPSHOT-runner`
-
-If you want to learn more about building native executables, please consult <https://quarkus.io/guides/gradle-tooling>.
-
-## Related Guides
-
-- MongoDB with Panache ([guide](https://quarkus.io/guides/mongodb-panache)): Simplify your persistence code for MongoDB
-  via the active record or the repository pattern
-- Scheduler ([guide](https://quarkus.io/guides/scheduler)): Schedule jobs and tasks
+- `src/main/java/com/remotefalcon/service/AccountArchiveService.java` — both scheduled jobs (~80 LOC)
+- `src/main/java/com/remotefalcon/repository/ShowRepository.java` — the cutoff queries
