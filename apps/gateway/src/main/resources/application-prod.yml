@@ -1,0 +1,7 @@
+services:
+  control-panel:
+    path: remote-falcon-control-panel
+    uri: https://remotefalcon.com/remote-falcon-control-panel
+  viewer:
+    path: remote-falcon-viewer
+    uri: https://remotefalcon.com/remote-falcon-viewer
