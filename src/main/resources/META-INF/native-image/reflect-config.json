@@ -1,0 +1,26 @@
+[
+  {
+    "name": "[Ljava.util.Calendar;",
+    "unsafeAllocated": true
+  },
+  {
+    "name": "[Ljava.sql.Date;",
+    "unsafeAllocated": true
+  },
+  {
+    "name": "[Ljava.sql.Time;",
+    "unsafeAllocated": true
+  },
+  {
+    "name": "[Ljava.sql.Timestamp;",
+    "unsafeAllocated": true
+  },
+  {
+    "name": "[Ljava.util.Date;",
+    "unsafeAllocated": true
+  },
+  {
+    "name": "[Ljava.util.GregorianCalendar;",
+    "unsafeAllocated": true
+  }
+]
