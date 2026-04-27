@@ -20,9 +20,9 @@
 #   - core (--core flag): self-host shape (matches the deployment-wizard / developer-files)
 #                         mongo + ui + control-panel + viewer + plugins-api + ingress
 #
-# Heads-up: the FIRST build is slow. The Quarkus services compile to GraalVM
-# native images — expect 5-10 minutes per service. Subsequent builds are cached.
-# Core mode is meaningfully faster on first build (5 services instead of 9).
+# Heads-up: the FIRST build pulls base images and resolves dep trees end-to-end.
+# Each service builds in ~1-3 min on JVM (the dev-mode default — see Dockerfile.dev
+# vs Dockerfile in each apps/<svc>/). Subsequent builds are cached.
 #
 # Usage:
 #   ./dev-up.sh up [--core] [svc...]    # build + start (platform default; --core for self-host)
@@ -123,11 +123,11 @@ cmd_up() {
   fi
   if $first_run; then
     if [[ "$MODE" == "platform" ]]; then
-      warn "First-time build detected (platform mode). 9 services; Quarkus native images take 5-10 min EACH."
-      warn "Stack-wide initial build can take 30+ minutes. Subsequent builds cache."
+      warn "First-time build detected (platform mode). 9 services build serially via Dockerfile.dev (JVM jars; ~1-3 min each)."
+      warn "Stack-wide initial build typically completes in ~10-15 minutes. Subsequent builds cache."
     else
-      warn "First-time build detected (core mode). 5 services; Quarkus native images take 5-10 min EACH."
-      warn "Initial build will be meaningfully faster than platform mode. Subsequent builds cache."
+      warn "First-time build detected (core mode). 5 services build serially via Dockerfile.dev (JVM jars; ~1-3 min each)."
+      warn "Stack-wide initial build typically completes in ~5-8 minutes. Subsequent builds cache."
     fi
     read -r -p "Proceed? [y/N] " ans
     [[ "$ans" =~ ^[Yy]$ ]] || { warn "Aborted."; exit 0; }
@@ -145,7 +145,7 @@ cmd_up() {
     log "[$MODE] Starting: ${REMAINING_ARGS[*]}"
     dc up -d "${REMAINING_ARGS[@]}"
   else
-    log "[$MODE] Building (parallel=$parallel_limit) — first-time native images take 5-10 min EACH."
+    log "[$MODE] Building (parallel=$parallel_limit) — JVM jars; ~1-3 min per service on first build."
     COMPOSE_PARALLEL_LIMIT="$parallel_limit" dc build
     log "[$MODE] Starting the stack."
     dc up -d

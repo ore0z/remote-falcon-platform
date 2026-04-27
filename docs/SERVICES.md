@@ -377,7 +377,7 @@ For end-to-end work without DigitalOcean / GitHub Actions, the repo ships a Dock
 - Direct service ports (bypass nginx): control-panel 8081, viewer 8082, plugins-api 8083, external-api 8084, mongo-backup 8085, account-archive 8086, gateway 8087, ui 3000
 
 **Caveats:**
-- **First build is slow.** The four Quarkus services (viewer, plugins-api, account-archive, mongo-backup) compile to GraalVM native images — 5-10 min each. Stack-wide initial build can take 30+ minutes; cached rebuilds are fast.
+- **Dev uses JVM, not native.** Each service has a `Dockerfile.dev` (JVM jar / Quarkus fast-jar) alongside its prod `Dockerfile` (GraalVM native). The local Compose stack builds the `.dev` variants; build time per service is ~1-3 min. Stack-wide initial build is ~5-8 min in core mode, ~10-15 min in platform mode. Native builds remain canonical for CI/prod deploys. See `ops/README.md` for the dev/prod build contract.
 - **`MONGO_URI` is baked into the Quarkus native images at build time** via Docker build-args. The compose file passes `mongodb://mongo:27017/remote-falcon` so service-to-service DNS works inside the docker network. To repoint, change the compose build-args and rebuild — restarting alone won't help.
 - **No Datadog / OpenTelemetry / ServiceMonitor** in the dev stack. Those run in prod via the `remote-falcon-data` repo and `kube-prometheus-stack` — out of scope for local.
 - **Optional secrets** (SendGrid, OpenAI/Wattson, Google Maps, S3 backup, etc.) default to empty in `.env.dev.example`. The corresponding features just won't work in dev unless you fill them in.
