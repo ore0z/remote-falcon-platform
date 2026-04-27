@@ -13,7 +13,8 @@ RUN ./gradlew clean build -Dquarkus.native.enabled=true \
     -Dquarkus.native.container-build=false \
     -Dquarkus.native.builder-image=graalvm \
     -Dquarkus.native.container-runtime=docker \
-    -Dquarkus.otel.enabled=false
+    -Dquarkus.otel.enabled=false \
+    -Dquarkus.native.native-image-xmx=4g
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.2
 WORKDIR /app

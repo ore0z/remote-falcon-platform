@@ -132,12 +132,23 @@ cmd_up() {
     read -r -p "Proceed? [y/N] " ans
     [[ "$ans" =~ ^[Yy]$ ]] || { warn "Aborted."; exit 0; }
   fi
+  # Build sequentially first, then start in parallel.
+  # Why sequential build: GraalVM native-image generation peaks at 4-6GB RAM
+  # per service. Parallel builds OOM on default Docker Desktop allocations
+  # (~8GB). Sequential builds use the full Docker memory budget for one
+  # native-image at a time. Override with COMPOSE_PARALLEL_LIMIT=N if you
+  # have headroom (e.g. 16GB+ allocated to Docker).
+  local parallel_limit="${COMPOSE_PARALLEL_LIMIT:-1}"
   if [[ ${#REMAINING_ARGS[@]} -gt 0 && -n "${REMAINING_ARGS[0]:-}" ]]; then
-    log "[$MODE] Bringing up: ${REMAINING_ARGS[*]}"
-    dc up -d --build "${REMAINING_ARGS[@]}"
+    log "[$MODE] Building (parallel=$parallel_limit): ${REMAINING_ARGS[*]}"
+    COMPOSE_PARALLEL_LIMIT="$parallel_limit" dc build "${REMAINING_ARGS[@]}"
+    log "[$MODE] Starting: ${REMAINING_ARGS[*]}"
+    dc up -d "${REMAINING_ARGS[@]}"
   else
-    log "[$MODE] Bringing up the stack."
-    dc up -d --build
+    log "[$MODE] Building (parallel=$parallel_limit) — first-time native images take 5-10 min EACH."
+    COMPOSE_PARALLEL_LIMIT="$parallel_limit" dc build
+    log "[$MODE] Starting the stack."
+    dc up -d
   fi
   log "Up. Browse: http://localhost:8080"
   log "Health check: ./dev-up.sh health${MODE:+ }${MODE:+--$MODE}"
@@ -180,7 +191,7 @@ cmd_rebuild() {
   fi
   local svc="${REMAINING_ARGS[0]}"
   log "[$MODE] Rebuilding $svc (no cache)."
-  dc build --no-cache "$svc"
+  COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" dc build --no-cache "$svc"
   dc up -d "$svc"
 }
 
