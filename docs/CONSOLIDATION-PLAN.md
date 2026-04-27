@@ -20,7 +20,7 @@
 | Phase | Status | Started | Completed | Notes |
 |---|---|---|---|---|
 | 0: Pre-work | ✅ Complete | 2026-04-27 | 2026-04-27 | Tags pushed to all 10 repos; baseline captured; `developer-files` migration risk surfaced |
-| A: Monorepo cutover | 🚧 In progress | 2026-04-27 | | A1 (subtree-merge) ✓; A2 (JitPack→local module) ✓; A3 (ops/ + platform/core split) ✓; A4–A7 pending |
+| A: Monorepo cutover | 🚧 In progress | 2026-04-27 | | A1 (subtree-merge) ✓; A2 (JitPack→local module) ✓; A3 (ops/ + platform/core split) ✓; A4 (cutover gate, core 4/4 + platform 8/8) ✓; A5–A7 pending |
 | B: Unified CI | ☐ Not started | | | |
 | C: Test pyramid | ☐ Not started | | | |
 | D: Service merges | ☐ Not started | | | |
@@ -136,7 +136,15 @@ remote-falcon-platform/
     - Build time per service drops from 15–60 min (native) to 1–3 min (JVM). Docker memory floor drops from 12–16 GB to ~4 GB.
     - Phase B's unified CI workflow will use the prod Dockerfiles (native) for actual deploys.
 
-- [ ] **A4. Verify locally.** `./ops/dev-up.sh up && ./ops/dev-up.sh health` — every service must come up green. **This is the cutover gate.**
+- [x] **A4. Verify locally.** *(completed 2026-04-27)*
+  - **Core mode** (`./ops/dev-up.sh up --core` then `health --core`): 4/4 green (ui, control-panel, viewer, plugins-api).
+  - **Platform mode** (`./ops/dev-up.sh up` then `health`): 8/8 green (core + gateway, external-api, mongo-backup, account-archive).
+  - Issues surfaced and resolved during the gate:
+    - **Dockerfile.dev jar coords:** Maven services have `<finalName>${project.artifactId}</finalName>` so the produced jar has no version suffix; updated COPY pattern from `<svc>-*.jar` to the exact filename.
+    - **dev-nginx upstream resolution:** rewrote `proxy_pass` blocks to use `set $upstream_x ...` variables + a `resolver 127.0.0.11` directive so nginx defers DNS lookups to request time. Necessary for core mode (where 4 backends deliberately aren't started) and resilient against compose's DNS-registration race in platform mode.
+    - **`.env.dev` gaps for control-panel:** S3ClientConfig hard-fails at bean creation if `s3.endpoint` is blank; added dummy values and `WEB_URL=http://localhost:3000` to `.env.dev.example` (issue [#4](https://github.com/Remote-Falcon/remote-falcon-platform/issues/4) tracks the proper conditional-bean cleanup).
+    - **Profile-specific YAML for gateway + external-api:** both rely on properties not in base `application.yml` (services.* URIs / paths for gateway; viewer.api.url for external-api). Created `application-dev.yml` in each — the prod sibling `application-prod.yml` already exists, this is the standard Spring profile-config pattern.
+    - **Gateway health check route:** `dev-up.sh health` was hitting gateway via dev-nginx at `/remote-falcon-gateway/actuator/health`, but gateway's actuator lives at `/actuator/health` (no prefix) — the prefix is for SCG's own routing predicates. Updated the health probe to hit gateway directly on its mapped port (8087), mirroring how kubelet hits the pod in prod.
 
 - [ ] **A5. Copy the 8 existing workflows verbatim** into `.github/workflows/`, renaming to `<service>-deploy.yml`. Add `paths:` filters so each only fires when its service changes:
   ```yaml
@@ -404,3 +412,4 @@ Pick based on what hurts most.
 | 2026-04-27 | Phase A1 executed: monorepo created at `Remote-Falcon/remote-falcon-platform` (private); 8 services + library subtree-merged with squashed history | Matt + Claude session |
 | 2026-04-27 | Phase A2 executed: root Maven aggregator pom.xml added; all 5 consumers switched from JitPack `com.github.Remote-Falcon:...:a5703a28fe` → local `com.remotefalcon:remote-falcon-library:1.0.0-LOCAL`; Gradle composite deferred to Phase B | Matt + Claude session |
 | 2026-04-27 | Phase A3 executed: ops/ created with dev-up.sh, compose, nginx; introduced platform/core mode split via Compose profiles to support both SaaS-operator and self-host deployments (matching the existing deployment-wizard shape); --core flag added to dev-up.sh | Matt + Claude session |
+| 2026-04-27 | Phase A4 verified: cutover gate green in both modes (core 4/4, platform 8/8). Fixed Dockerfile.dev jar coords, dev-nginx lazy upstream resolution, .env.dev S3/web.url gaps, application-dev.yml for gateway+external-api, gateway health URL. Issue #4 tracks S3ClientConfig conditional-bean cleanup. | Matt + Claude session |

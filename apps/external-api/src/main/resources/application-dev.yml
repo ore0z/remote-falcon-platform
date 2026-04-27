@@ -1,0 +1,5 @@
+# Dev profile — used by the local Compose stack (SPRING_PROFILES_ACTIVE=dev).
+# Points the viewer API at the in-Docker DNS name + Quarkus root-path.
+viewer:
+  api:
+    url: http://viewer:8080/remote-falcon-viewer

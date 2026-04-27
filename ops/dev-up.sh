@@ -220,7 +220,11 @@ cmd_health() {
       "external-api|http://localhost:8080/remote-falcon-external-api/actuator/health"
       "mongo-backup|http://localhost:8080/remote-falcon-mongo-backup/q/health"
       "account-archive|http://localhost:8080/remote-falcon-account-archive/q/health"
-      "gateway|http://localhost:8080/remote-falcon-gateway/actuator/health"
+      # Gateway's actuator lives at /actuator/health (no prefix). In prod, kubelet
+      # hits the pod directly there; the ingress prefix /remote-falcon-gateway is
+      # only used for SCG's own request-routing predicates. We mirror prod by
+      # hitting the gateway's mapped port directly instead of via dev-nginx.
+      "gateway|http://localhost:8087/actuator/health"
     )
   fi
   local ok=0 fail=0

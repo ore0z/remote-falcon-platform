@@ -1,0 +1,11 @@
+# Dev profile — used by the local Compose stack (SPRING_PROFILES_ACTIVE=dev).
+# Mirrors application-prod.yml's shape but points routes at in-Docker DNS
+# names (each backend's compose service name) on container port 8080.
+# Path values match the prod nginx-ingress prefixes so URL parity holds.
+services:
+  control-panel:
+    path: remote-falcon-control-panel
+    uri: http://control-panel:8080
+  viewer:
+    path: remote-falcon-viewer
+    uri: http://viewer:8080
