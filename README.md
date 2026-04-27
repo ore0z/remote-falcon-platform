@@ -48,6 +48,4 @@ These ship code that runs *outside* the production cluster — on FPP show contr
 - [`remote-falcon-plugin`](https://github.com/Remote-Falcon/remote-falcon-plugin) — FPP plugin (PHP + JS + shell)
 - [`remote-falcon-viewer-page-js`](https://github.com/Remote-Falcon/remote-falcon-viewer-page-js) — CDN-served viewer-page scripts
 - [`remote-falcon-page-templates`](https://github.com/Remote-Falcon/remote-falcon-page-templates) — default viewer-page HTML templates
-- [`remote-falcon-mobile`](https://github.com/Remote-Falcon/remote-falcon-mobile) — Expo / React Native mobile app
-- [`remote-falcon-deployment-wizard`](https://github.com/Remote-Falcon/remote-falcon-deployment-wizard) — customer-installable Node deployer
 - [`remote-falcon-issue-tracker`](https://github.com/Remote-Falcon/remote-falcon-issue-tracker) — public bug/feature tracker + External API sample
