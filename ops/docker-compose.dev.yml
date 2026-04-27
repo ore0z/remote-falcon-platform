@@ -1,0 +1,165 @@
+# Local development stack for Remote Falcon.
+# Builds each service from its in-tree Dockerfile, runs them against a local
+# MongoDB, and fronts everything with an nginx reverse-proxy that mirrors the
+# production ingress paths — so UI/API URLs are identical to prod.
+#
+# Two operating modes via Compose profiles:
+#   - core (default):    mongo + ui + control-panel + viewer + plugins-api + ingress
+#                        Matches what self-hosted deployments need (wizard, developer-files).
+#   - platform (added):  core + gateway + external-api + mongo-backup + account-archive
+#                        The full SaaS stack we operate.
+#
+# Wrapper:
+#   ./dev-up.sh up           # platform mode (default for this workspace)
+#   ./dev-up.sh up --core    # core / self-host mode
+#
+# Or with raw compose:
+#   docker compose -f ops/docker-compose.dev.yml up                          # core only
+#   docker compose -f ops/docker-compose.dev.yml --profile platform up       # full
+
+name: remote-falcon-dev
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: rf-mongo
+    ports: ["27017:27017"]
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  control-panel:
+    build:
+      context: ../apps/control-panel
+    container_name: rf-control-panel
+    env_file: .env.dev
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATA_MONGODB_URI: mongodb://mongo:27017/remote-falcon
+      AUTO_VALIDATE_EMAIL: "true"
+    ports: ["8081:8080"]
+    depends_on:
+      mongo: { condition: service_healthy }
+
+  viewer:
+    build:
+      context: ../apps/viewer
+      args:
+        MONGO_URI: mongodb://mongo:27017/remote-falcon
+        OTEL_URI: ""
+    container_name: rf-viewer
+    environment:
+      MONGO_URI: mongodb://mongo:27017/remote-falcon
+    ports: ["8082:8080"]
+    depends_on:
+      mongo: { condition: service_healthy }
+
+  plugins-api:
+    build:
+      context: ../apps/plugins-api
+      args:
+        MONGO_URI: mongodb://mongo:27017/remote-falcon
+        OTEL_URI: ""
+    container_name: rf-plugins-api
+    environment:
+      MONGO_URI: mongodb://mongo:27017/remote-falcon
+    ports: ["8083:8080"]
+    depends_on:
+      mongo: { condition: service_healthy }
+
+  external-api:
+    profiles: [platform]
+    build:
+      context: ../apps/external-api
+    container_name: rf-external-api
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATA_MONGODB_URI: mongodb://mongo:27017/remote-falcon
+    ports: ["8084:8080"]
+    depends_on:
+      mongo: { condition: service_healthy }
+
+  mongo-backup:
+    profiles: [platform]
+    build:
+      context: ../apps/mongo-backup
+      args:
+        MONGO_URI: mongodb://mongo:27017/remote-falcon
+        OTEL_URI: ""
+    container_name: rf-mongo-backup
+    env_file: .env.dev
+    environment:
+      MONGO_URI: mongodb://mongo:27017/remote-falcon
+    ports: ["8085:8080"]
+    depends_on:
+      mongo: { condition: service_healthy }
+
+  account-archive:
+    profiles: [platform]
+    build:
+      context: ../apps/account-archive
+      args:
+        MONGO_URI: mongodb://mongo:27017/remote-falcon
+        OTEL_URI: ""
+    container_name: rf-account-archive
+    environment:
+      MONGO_URI: mongodb://mongo:27017/remote-falcon
+    ports: ["8086:8080"]
+    depends_on:
+      mongo: { condition: service_healthy }
+
+  gateway:
+    profiles: [platform]
+    build:
+      context: ../apps/gateway
+      args:
+        OTEL_OPTS: ""
+    container_name: rf-gateway
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+    ports: ["8087:8080"]
+
+  ui:
+    build:
+      context: ../apps/ui
+      args:
+        HOST_ENV: dev
+        VERSION: dev
+        CONTROL_PANEL_API: http://localhost:8080/remote-falcon-control-panel
+        VIEWER_API: http://localhost:8080/remote-falcon-viewer
+        VIEWER_JWT_KEY: ${VIEWER_JWT_KEY:-dev-jwt-secret-change-me}
+        GOOGLE_MAPS_KEY: ${GOOGLE_MAPS_KEY:-}
+        PUBLIC_POSTHOG_KEY: ${PUBLIC_POSTHOG_KEY:-}
+        GA_TRACKING_ID: ${GA_TRACKING_ID:-}
+        MIXPANEL_KEY: ${MIXPANEL_KEY:-}
+        HOSTNAME_PARTS: "1"
+        SWAP_CP: "false"
+        VIEWER_PAGE_SUBDOMAIN: ""
+        CLARITY_PROJECT_ID: ${CLARITY_PROJECT_ID:-}
+        SOCIAL_META: ""
+    container_name: rf-ui
+    ports: ["3000:3000"]
+
+  ingress:
+    image: nginx:1.27-alpine
+    container_name: rf-ingress
+    ports: ["8080:8080"]
+    volumes:
+      - ./dev-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    # depends_on intentionally lists only always-active (core) services so the
+    # ingress comes up cleanly in both core and platform modes. Routes for
+    # platform-only services will 502 in core mode — that is the intended
+    # behaviour (those services aren't supposed to exist in self-host).
+    depends_on:
+      - ui
+      - control-panel
+      - viewer
+      - plugins-api
+
+volumes:
+  mongo-data:

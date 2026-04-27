@@ -8,7 +8,7 @@ Monorepo for the Remote Falcon platform — the show-owner control panel, the pu
 |---|---|
 | [`apps/`](apps/) | Production services — see each subdirectory's README for details |
 | [`libs/schema/`](libs/schema/) | Shared MongoDB schema, consumed by 5 of the 8 backend services |
-| `ops/` | Local dev stack and deployment tooling *(landing in [Phase A3](docs/CONSOLIDATION-PLAN.md))* |
+| [`ops/`](ops/) | Local dev stack — `dev-up.sh`, Compose, nginx — with platform/core profile split for self-host |
 | [`docs/`](docs/) | Architecture, operational, and migration references |
 
 ## Services
@@ -39,7 +39,7 @@ If you change something that affects deploy mechanics, secrets, test counts, or 
 
 ## Status
 
-Consolidation in progress. Currently in **Phase A** of [`docs/CONSOLIDATION-PLAN.md`](docs/CONSOLIDATION-PLAN.md) — services have been imported via subtree-merge, JitPack has been replaced with the local `libs/schema` module, and the per-service workflows are still in place. Phases B (unified CI), C (test pyramid), D (service merges), and E (observability + cleanup) follow.
+Consolidation in progress. Currently in **Phase A** of [`docs/CONSOLIDATION-PLAN.md`](docs/CONSOLIDATION-PLAN.md) — services have been imported via subtree-merge, JitPack has been replaced with the local `libs/schema` module, and `ops/` now hosts the local dev stack with platform/core mode split. The per-service GitHub Actions workflows are still in place. Phases A4–A7 (cutover gate, unified CI scaffolding, GHCR + repo archive), then B (unified CI), C (test pyramid), D (service merges), and E (observability + cleanup) follow.
 
 ## Build order (Phase A interim)
 
@@ -58,7 +58,7 @@ cd apps/account-archive && ./gradlew build # Gradle consumer
 cd apps/mongo-backup && ./gradlew build    # Gradle non-consumer (no install step needed)
 ```
 
-The local Compose stack (`./dev-up.sh up` — landing in `ops/` in [Phase A3](docs/CONSOLIDATION-PLAN.md)) wraps this for full-stack development.
+The local Compose stack ([`./ops/dev-up.sh up`](ops/)) wraps this for full-stack development. See [`ops/README.md`](ops/README.md) for the platform/core mode split.
 
 ## Customer-facing repos (out-of-tree)
 

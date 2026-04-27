@@ -20,7 +20,7 @@
 | Phase | Status | Started | Completed | Notes |
 |---|---|---|---|---|
 | 0: Pre-work | ✅ Complete | 2026-04-27 | 2026-04-27 | Tags pushed to all 10 repos; baseline captured; `developer-files` migration risk surfaced |
-| A: Monorepo cutover | 🚧 In progress | 2026-04-27 | | A1 (subtree-merge) ✓; A2 (JitPack→local module) ✓; A3–A7 pending |
+| A: Monorepo cutover | 🚧 In progress | 2026-04-27 | | A1 (subtree-merge) ✓; A2 (JitPack→local module) ✓; A3 (ops/ + platform/core split) ✓; A4–A7 pending |
 | B: Unified CI | ☐ Not started | | | |
 | C: Test pyramid | ☐ Not started | | | |
 | D: Service merges | ☐ Not started | | | |
@@ -111,7 +111,16 @@ remote-falcon-platform/
   - **Bootstrap order:** Gradle services require `mvn install -pl libs/schema -am` to run first (since they consume the lib via `mavenLocal()`, not a Gradle composite). Documented in the monorepo root README.
   - **Deferred:** the originally-planned Gradle composite (`include 'libs:schema', 'apps:viewer', ...`) is **not** in this phase. Reason: `libs/schema` is a Maven project; making Gradle's `include` directive resolve it cleanly would require either duplicating dep info into a `build.gradle` or restructuring the lib. Left for Phase B (unified CI), where the workflow already runs `mvn install` before `./gradlew build` anyway.
 
-- [ ] **A3. Update `dev-up.sh` paths.** Build contexts in `docker-compose.dev.yml` change from `./remote-falcon-ui` to `./apps/ui` etc. The `.env.dev` interface stays identical.
+- [x] **A3. Move ops tooling into `ops/` with self-host vs platform mode split.** *(completed 2026-04-27)*
+  - `dev-up.sh`, `docker-compose.dev.yml`, `dev-nginx.conf`, `.env.dev.example` copied from `~/rf-build/` to `remote-falcon-platform/ops/`. Originals retained as workspace reference until A4 verification.
+  - **Build contexts** updated in `docker-compose.dev.yml`: `./remote-falcon-<svc>` → `../apps/<svc>`. `.env.dev` interface unchanged.
+  - **Compose profile split** added based on the deployment-wizard's existing self-host shape:
+    - **Core (always-active, default):** `mongo`, `ui`, `control-panel`, `viewer`, `plugins-api`, `ingress`. Matches what the wizard and `developer-files/local-docker-compose` ship.
+    - **Platform-only (`profiles: [platform]`):** `gateway`, `external-api`, `mongo-backup`, `account-archive`. SaaS-operator concerns; not relevant to single-tenant self-host.
+  - **`dev-up.sh` flag handling** added: `--core` flag (parseable anywhere in args) omits the platform profile; default behavior is unchanged for the workspace operator. Health check skips platform-only services in core mode.
+  - **Ingress depends_on** trimmed to always-active services only (otherwise compose would fail to start in core mode). Routes for missing services 502 — accepted as correct self-host behavior.
+  - Added `ops/README.md` documenting both modes, endpoints, and bootstrap order.
+  - Verified bash syntax (`bash -n`), YAML structure, and that all 8 build contexts resolve to actual Dockerfiles in `apps/`.
 
 - [ ] **A4. Verify locally.** `./ops/dev-up.sh up && ./ops/dev-up.sh health` — every service must come up green. **This is the cutover gate.**
 
@@ -380,3 +389,4 @@ Pick based on what hurts most.
 | 2026-04-27 | Phase 0 executed: 10 tags pushed, baseline captured, repo strategy decided, `developer-files` migration risk added to A7 | Matt + Claude session |
 | 2026-04-27 | Phase A1 executed: monorepo created at `Remote-Falcon/remote-falcon-platform` (private); 8 services + library subtree-merged with squashed history | Matt + Claude session |
 | 2026-04-27 | Phase A2 executed: root Maven aggregator pom.xml added; all 5 consumers switched from JitPack `com.github.Remote-Falcon:...:a5703a28fe` → local `com.remotefalcon:remote-falcon-library:1.0.0-LOCAL`; Gradle composite deferred to Phase B | Matt + Claude session |
+| 2026-04-27 | Phase A3 executed: ops/ created with dev-up.sh, compose, nginx; introduced platform/core mode split via Compose profiles to support both SaaS-operator and self-host deployments (matching the existing deployment-wizard shape); --core flag added to dev-up.sh | Matt + Claude session |
