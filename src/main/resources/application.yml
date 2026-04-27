@@ -1,0 +1,38 @@
+context-path: remote-falcon-gateway
+
+server:
+  port: 8080
+
+spring:
+  application:
+    name: remote-falcon-gateway
+  cloud:
+    gateway:
+      globalcors:
+        add-to-simple-url-handler-mapping: true
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin, RETAIN_FIRST
+      routes:
+        - id: control_panel_path
+          uri: ${services.control-panel.uri}
+          predicates:
+            - Path=/${context-path}/**
+            - Header=Route, Control-Panel, CF-Connecting-IP, \d+
+          filters:
+            - MapRequestHeader=Control-Panel
+            - RewritePath=/${context-path}/(?<segment>.*),/${services.control-panel.path}/$\{segment}
+        - id: viewer_path
+          uri: ${services.viewer.uri}
+          predicates:
+            - Path=/${context-path}/**
+            - Header=Route, Viewer, CF-Connecting-IP, \d+
+          filters:
+            - MapRequestHeader=Viewer
+            - RewritePath=/${context-path}/(?<segment>.*),/${services.viewer.path}/$\{segment}
+      x-forwarded:
+        for-enabled: true
