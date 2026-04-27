@@ -1,0 +1,31 @@
+type Mutation {
+    signUp(firstName: String, lastName: String, showName: String!): Boolean
+    forgotPassword(email: String!): Boolean
+    verifyEmail(showToken: String!): Boolean
+    resetPassword: Boolean
+    updatePassword: Boolean
+    updateUserProfile(userProfile: UserProfileInput!): Boolean
+    requestApiAccess: Boolean
+    deleteAccount: Boolean
+    updateShow(email: String!, showName: String!): Boolean
+    updatePreferences(preferences: PreferenceInput!): Boolean
+    updatePages(pages: [PageInput]!): Boolean
+    updatePsaSequences(psaSequences: [PsaSequenceInput]!): Boolean
+    updateSequences(sequences: [SequenceInput]!): Boolean
+    updateSequenceGroups(sequenceGroups: [SequenceGroupInput]!): Boolean
+    playSequenceFromControlPanel(sequence: SequenceInput!): Boolean
+    deleteSingleRequest(position: Int!): Boolean
+    deleteAllRequests: Boolean
+    resetAllVotes: Boolean
+    adminUpdateShow(show: ShowInput!): Boolean
+    deleteNowPlaying: Boolean
+    purgeStats: Boolean
+    deleteStatsWithinRange(startDate: Long!, endDate: Long!, timezone: String = "America/Chicago"): Boolean
+    createNotification(notification: NotificationInput!): Boolean
+    createNotificationForUser(notification: NotificationInput!, showSubdomain: String!): Boolean
+    deleteNotification(uuid: String!): Boolean
+    markNotificationsAsRead(uuids: [String]!): Boolean
+    deleteNotificationForUser(uuid: String!): Boolean
+    updateExpoPushToken(expoPushToken: String!): Boolean
+    wattsonFeedback(responseId: String!, feedback: String!): Boolean
+}

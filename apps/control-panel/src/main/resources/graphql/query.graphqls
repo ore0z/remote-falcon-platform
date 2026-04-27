@@ -1,0 +1,15 @@
+type Query {
+    signIn: Show
+    verifyPasswordResetLink(passwordResetLink: String!): Show
+    getShow: Show
+    dashboardLiveStats(startDate: Long!, endDate: Long!, timezone: String = "America/Chicago"): DashboardLiveStats
+    dashboardStats(startDate: Long!, endDate: Long!, timezone: String = "America/Chicago"): DashboardStats
+    showsOnAMap: [ShowsOnAMap]
+    getShowsAutoSuggest(showName: String!): [String]
+    getShowByShowName(showName: String!): Show
+    getNotifications: [ShowNotification]
+    askWattson(prompt: String!, previousResponseId: String): AskWattson
+    getWattsonResponse(responseId: String!): WattsonResponse
+    getWattsonFeedback(filterBy: String): [Wattson]
+    impersonateShow(showSubdomain: String!): Show
+}

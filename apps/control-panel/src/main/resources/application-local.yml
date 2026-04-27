@@ -1,0 +1,10 @@
+web:
+  url: "http://localhost:3000"
+
+server:
+  port: 8081
+
+client:
+  header: "CF-Connecting-IP"
+
+auto-validate-email: false
