@@ -1,6 +1,22 @@
+# Build context: monorepo root (..)
+# Dockerfile path: apps/plugins-api/Dockerfile
+#
+# This Dockerfile expects the build context to be the monorepo root so that
+# libs/schema (the shared MongoDB entity model) can be installed into a
+# Maven repo cache before the Quarkus/Gradle build resolves it.
+
+# Stage 0: build libs/schema using a Maven-equipped base image.
+FROM maven:3-eclipse-temurin-17 AS schema-build
+WORKDIR /lib
+COPY libs/schema/pom.xml .
+COPY libs/schema/src ./src
+RUN mvn install -DskipTests -B
+
+# Stage 1: GraalVM service build, inheriting the schema jar from .m2 cache.
 FROM container-registry.oracle.com/graalvm/native-image:21 AS build
 WORKDIR /app
-COPY . .
+COPY --from=schema-build /root/.m2/repository /root/.m2/repository
+COPY apps/plugins-api/. .
 RUN sed -i 's/\r$//' ./gradlew
 RUN chmod +x ./gradlew
 
@@ -36,4 +52,3 @@ ENTRYPOINT [ \
   "-XX:MaximumHeapSizePercent=75", \
   "-Dquarkus.http.host=0.0.0.0" \
   ]
-

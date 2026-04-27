@@ -1,0 +1,48 @@
+# Files at the monorepo root that don't belong in any Docker build context.
+# This applies to all docker builds run with the monorepo root as their context
+# (control-panel, external-api, viewer, plugins-api, account-archive). It does
+# NOT apply to services whose build context is still apps/<svc>/ — they have
+# their own per-service .dockerignore (or none, since their context is small).
+
+.git
+.gitignore
+.gitattributes
+.github
+.idea
+.vscode
+*.iml
+
+# Build artifacts that may exist in service directories
+**/build
+**/target
+**/.gradle
+**/node_modules
+**/dist
+
+# Test / coverage outputs
+**/coverage
+**/.nyc_output
+**/jacoco
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Workspace + planning docs are reference, not buildable code
+docs/
+README.md
+*.md
+
+# Operator scripts that aren't relevant inside any build
+ops/dev-up.sh
+ops/dev-nginx.conf
+ops/.env.dev
+ops/.env.dev.example
+baseline-*/
+
+# Other apps shouldn't bleed into one app's build
+# (Each Dockerfile selectively COPYs apps/<its-own-svc>/. and libs/schema/.)
+# We don't blanket-ignore apps/ because Dockerfiles need access to their own
+# subdir; the per-Dockerfile COPY paths handle the scoping.

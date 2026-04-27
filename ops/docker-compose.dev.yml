@@ -35,7 +35,9 @@ services:
 
   control-panel:
     build:
-      context: ../apps/control-panel
+      # Monorepo-root context so libs/schema is COPYable from the Dockerfile.
+      context: ..
+      dockerfile: apps/control-panel/Dockerfile
     container_name: rf-control-panel
     env_file: .env.dev
     environment:
@@ -48,7 +50,9 @@ services:
 
   viewer:
     build:
-      context: ../apps/viewer
+      # Monorepo-root context so libs/schema is COPYable from the Dockerfile.
+      context: ..
+      dockerfile: apps/viewer/Dockerfile
       args:
         MONGO_URI: mongodb://mongo:27017/remote-falcon
         OTEL_URI: ""
@@ -61,7 +65,9 @@ services:
 
   plugins-api:
     build:
-      context: ../apps/plugins-api
+      # Monorepo-root context so libs/schema is COPYable from the Dockerfile.
+      context: ..
+      dockerfile: apps/plugins-api/Dockerfile
       args:
         MONGO_URI: mongodb://mongo:27017/remote-falcon
         OTEL_URI: ""
@@ -75,7 +81,9 @@ services:
   external-api:
     profiles: [platform]
     build:
-      context: ../apps/external-api
+      # Monorepo-root context so libs/schema is COPYable from the Dockerfile.
+      context: ..
+      dockerfile: apps/external-api/Dockerfile
     container_name: rf-external-api
     environment:
       SPRING_PROFILES_ACTIVE: dev
@@ -102,7 +110,9 @@ services:
   account-archive:
     profiles: [platform]
     build:
-      context: ../apps/account-archive
+      # Monorepo-root context so libs/schema is COPYable from the Dockerfile.
+      context: ..
+      dockerfile: apps/account-archive/Dockerfile
       args:
         MONGO_URI: mongodb://mongo:27017/remote-falcon
         OTEL_URI: ""

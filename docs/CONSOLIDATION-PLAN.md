@@ -111,7 +111,7 @@ remote-falcon-platform/
   - **Bootstrap order:** Gradle services require `mvn install -pl libs/schema -am` to run first (since they consume the lib via `mavenLocal()`, not a Gradle composite). Documented in the monorepo root README.
   - **Deferred:** the originally-planned Gradle composite (`include 'libs:schema', 'apps:viewer', ...`) is **not** in this phase. Reason: `libs/schema` is a Maven project; making Gradle's `include` directive resolve it cleanly would require either duplicating dep info into a `build.gradle` or restructuring the lib. Left for Phase B (unified CI), where the workflow already runs `mvn install` before `./gradlew build` anyway.
 
-- [x] **A3. Move ops tooling into `ops/` with self-host vs platform mode split.** *(completed 2026-04-27)*
+- [x] **A3. Move ops tooling into `ops/` with self-host vs platform mode split + Dockerfile audit/fix.** *(completed 2026-04-27)*
   - `dev-up.sh`, `docker-compose.dev.yml`, `dev-nginx.conf`, `.env.dev.example` copied from `~/rf-build/` to `remote-falcon-platform/ops/`. Originals retained as workspace reference until A4 verification.
   - **Build contexts** updated in `docker-compose.dev.yml`: `./remote-falcon-<svc>` → `../apps/<svc>`. `.env.dev` interface unchanged.
   - **Compose profile split** added based on the deployment-wizard's existing self-host shape:
@@ -121,6 +121,14 @@ remote-falcon-platform/
   - **Ingress depends_on** trimmed to always-active services only (otherwise compose would fail to start in core mode). Routes for missing services 502 — accepted as correct self-host behavior.
   - Added `ops/README.md` documenting both modes, endpoints, and bootstrap order.
   - Verified bash syntax (`bash -n`), YAML structure, and that all 8 build contexts resolve to actual Dockerfiles in `apps/`.
+  - **Dockerfile audit + fix** (folded into A3 to keep A4's cutover gate honest):
+    - Audited all 8 Dockerfiles. Found **5 broken by A2's JitPack removal**: `control-panel`, `external-api`, `viewer`, `plugins-api`, `account-archive` — each runs Maven/Gradle inside the container with empty `.m2`/`mavenLocal()`, and the JitPack repo we removed was the previous resolution path.
+    - Rewrote all 5 to use the canonical monorepo Docker pattern:
+      - **Maven services** (`control-panel`, `external-api`): single-stage build with the schema installed first via `mvn install` against `libs/schema`, then the service builds against the cached artifact.
+      - **Gradle services** (`viewer`, `plugins-api`, `account-archive`): added a dedicated `schema-build` stage on `maven:3-eclipse-temurin-17` that builds the schema, followed by the existing GraalVM service build stage which inherits the resulting `.m2/repository` cache.
+    - `docker-compose.dev.yml` build contexts for those 5 services updated from `../apps/<svc>` to `..` with explicit `dockerfile: apps/<svc>/Dockerfile`. The 3 unaffected services (`ui`, `gateway`, `mongo-backup`) keep their narrow `../apps/<svc>` context.
+    - Added a monorepo-root `.dockerignore` to keep build contexts lean (`.git`, build outputs, IDE files, planning docs, baselines, operator scripts).
+    - **Net effect:** the same Dockerfile pattern Phase B's unified CI workflow will need is in place now, so A4 verification can actually succeed.
 
 - [ ] **A4. Verify locally.** `./ops/dev-up.sh up && ./ops/dev-up.sh health` — every service must come up green. **This is the cutover gate.**
 
