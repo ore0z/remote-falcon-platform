@@ -1,0 +1,163 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: #{Namespace}#
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: #{Application}#
+  namespace: #{Namespace}#
+  labels:
+    app: #{Application}#
+spec:
+  replicas: #{Replicas}#
+  selector:
+    matchLabels:
+      app: #{Application}#
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: #{Application}#
+    spec:
+      containers:
+      - name: #{Application}#
+        image: #{Image}#
+        resources:
+          requests:
+            memory: #{Requests.Memory}#
+            cpu: #{Requests.CPU}#
+          limits:
+            memory: #{Limits.Memory}#
+            cpu: #{Limits.CPU}#
+        ports:
+        - containerPort: 8080
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: #{Env}#
+        - name: AUTO_VALIDATE_EMAIL
+          value: "false"
+        - name: SPRING_DATA_MONGODB_URI
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-control-panel
+              key: mongo-uri
+        - name: GITHUB_PAT
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-control-panel
+              key: github-pat
+        - name: SENDGRID_KEY
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-control-panel
+              key: sendgrid-key
+        - name: MAILERSEND_TEMPLATE_SIGN_UP
+          value: "v69oxl59ndrg785k"
+        - name: MAILERSEND_TEMPLATE_FORGOT_PASSWORD
+          value: "ynrw7gy02w2l2k8e"
+        - name: MAILERSEND_TEMPLATE_REQUEST_API_ACCESS
+          value: "yzkq340rd104d796"
+        - name: JWT_USER
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-control-panel
+              key: jwt-user
+        - name: CLIENT_HEADER
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-control-panel
+              key: client-header
+        - name: S3_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-control-panel
+              key: s3-endpoint
+        - name: S3_ACCESSKEY
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-control-panel
+              key: s3-accessKey
+        - name: S3_SECRETKEY
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-control-panel
+              key: s3-secretKey
+        - name: IMAGES_S3_BUCKET
+          value: remote-falcon-uploads
+        - name: IMAGES_CDN_ENDPOINT
+          value: https://remote-falcon-uploads.nyc3.cdn.digitaloceanspaces.com
+        - name: WATTSON_KEY
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-control-panel
+              key: wattson-key
+        - name: OPENAI_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-control-panel
+              key: openai-model
+        - name: WATTSON_MAX_OUTPUT_TOKENS
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-control-panel
+              key: max-output-tokens
+        startupProbe:
+          httpGet:
+            path: /remote-falcon-control-panel/actuator/health
+            port: 8080
+          failureThreshold: 60
+        livenessProbe:
+          httpGet:
+            path: /remote-falcon-control-panel/actuator/health
+            port: 8080
+          initialDelaySeconds: 0
+          timeoutSeconds: 10
+          failureThreshold: 60
+        readinessProbe:
+          httpGet:
+            path: /remote-falcon-control-panel/actuator/health
+            port: 8080
+          failureThreshold: 60
+          initialDelaySeconds: 0
+      imagePullSecrets:
+        - name: remote-falcon-ghcr
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: #{Application}#
+  namespace: #{Namespace}#
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+  selector:
+    app: #{Application}#
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: #{Application}#
+  namespace: #{Namespace}#
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: "3m"
+spec:
+  rules:
+  - host: #{Host}#
+    http:
+      paths:
+      - pathType: Prefix
+        path: /remote-falcon-control-panel
+        backend:
+          service:
+            name: #{Application}#
+            port:
+              number: 8080
