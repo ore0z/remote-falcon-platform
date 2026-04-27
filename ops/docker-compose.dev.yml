@@ -36,8 +36,9 @@ services:
   control-panel:
     build:
       # Monorepo-root context so libs/schema is COPYable from the Dockerfile.
+      # .dev variant builds JVM jar instead of native image -- prod uses Dockerfile.
       context: ..
-      dockerfile: apps/control-panel/Dockerfile
+      dockerfile: apps/control-panel/Dockerfile.dev
     container_name: rf-control-panel
     env_file: .env.dev
     environment:
@@ -51,8 +52,9 @@ services:
   viewer:
     build:
       # Monorepo-root context so libs/schema is COPYable from the Dockerfile.
+      # .dev variant builds Quarkus fast-jar instead of native -- prod uses Dockerfile.
       context: ..
-      dockerfile: apps/viewer/Dockerfile
+      dockerfile: apps/viewer/Dockerfile.dev
       args:
         MONGO_URI: mongodb://mongo:27017/remote-falcon
         OTEL_URI: ""
@@ -66,8 +68,9 @@ services:
   plugins-api:
     build:
       # Monorepo-root context so libs/schema is COPYable from the Dockerfile.
+      # .dev variant builds Quarkus fast-jar instead of native -- prod uses Dockerfile.
       context: ..
-      dockerfile: apps/plugins-api/Dockerfile
+      dockerfile: apps/plugins-api/Dockerfile.dev
       args:
         MONGO_URI: mongodb://mongo:27017/remote-falcon
         OTEL_URI: ""
@@ -82,8 +85,9 @@ services:
     profiles: [platform]
     build:
       # Monorepo-root context so libs/schema is COPYable from the Dockerfile.
+      # .dev variant builds JVM jar instead of native image -- prod uses Dockerfile.
       context: ..
-      dockerfile: apps/external-api/Dockerfile
+      dockerfile: apps/external-api/Dockerfile.dev
     container_name: rf-external-api
     environment:
       SPRING_PROFILES_ACTIVE: dev
@@ -95,7 +99,9 @@ services:
   mongo-backup:
     profiles: [platform]
     build:
+      # .dev variant builds Quarkus fast-jar instead of native -- prod uses Dockerfile.
       context: ../apps/mongo-backup
+      dockerfile: Dockerfile.dev
       args:
         MONGO_URI: mongodb://mongo:27017/remote-falcon
         OTEL_URI: ""
@@ -111,8 +117,9 @@ services:
     profiles: [platform]
     build:
       # Monorepo-root context so libs/schema is COPYable from the Dockerfile.
+      # .dev variant builds Quarkus fast-jar instead of native -- prod uses Dockerfile.
       context: ..
-      dockerfile: apps/account-archive/Dockerfile
+      dockerfile: apps/account-archive/Dockerfile.dev
       args:
         MONGO_URI: mongodb://mongo:27017/remote-falcon
         OTEL_URI: ""

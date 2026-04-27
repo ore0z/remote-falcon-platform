@@ -1,0 +1,22 @@
+# DEV ONLY -- JVM build (no -Pnative).
+# Build context: monorepo root. Dockerfile path: apps/external-api/Dockerfile.dev.
+# See apps/control-panel/Dockerfile.dev for full rationale.
+
+FROM maven:3-eclipse-temurin-17 AS schema-build
+WORKDIR /lib
+COPY libs/schema/pom.xml .
+COPY libs/schema/src ./src
+RUN mvn install -DskipTests -B
+
+FROM maven:3-eclipse-temurin-21 AS build
+WORKDIR /usr/src/app
+COPY --from=schema-build /root/.m2/repository /root/.m2/repository
+COPY apps/external-api/pom.xml .
+COPY apps/external-api/src ./src
+RUN mvn -DskipTests package
+
+FROM eclipse-temurin:21-jre
+WORKDIR /usr/app
+COPY --from=build /usr/src/app/target/remote-falcon-external-api-*.jar /usr/app/application.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/usr/app/application.jar"]

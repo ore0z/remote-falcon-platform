@@ -1,0 +1,32 @@
+# Environment files (contain secrets when populated)
+.env
+.env.*
+!.env.*.example
+!.env.example
+
+# Build outputs
+**/target/
+**/build/
+**/.gradle/
+**/node_modules/
+**/dist/
+
+# Test / coverage outputs
+**/coverage/
+**/.nyc_output/
+**/jacoco/
+**/test-output/
+
+# IDE / editor
+.idea/
+.vscode/
+*.iml
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Operator baselines (sensitive cluster snapshots)
+baseline-*/

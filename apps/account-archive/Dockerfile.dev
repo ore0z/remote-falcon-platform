@@ -1,0 +1,34 @@
+# DEV ONLY -- Quarkus fast-jar build (no native).
+# Build context: monorepo root. Dockerfile path: apps/account-archive/Dockerfile.dev.
+# See apps/viewer/Dockerfile.dev for full rationale.
+#
+# Note: account-archive's application.properties sets
+# quarkus.package.jar.enabled=false (native-only). The build override below
+# turns it back on for dev.
+
+FROM maven:3-eclipse-temurin-17 AS schema-build
+WORKDIR /lib
+COPY libs/schema/pom.xml .
+COPY libs/schema/src ./src
+RUN mvn install -DskipTests -B
+
+FROM eclipse-temurin:21-jdk AS build
+WORKDIR /app
+COPY --from=schema-build /root/.m2/repository /root/.m2/repository
+COPY apps/account-archive/. .
+RUN sed -i 's/\r$//' ./gradlew && chmod +x ./gradlew
+
+ARG MONGO_URI
+ARG OTEL_URI
+ENV MONGO_URI=${MONGO_URI}
+ENV OTEL_URI=${OTEL_URI}
+
+RUN ./gradlew clean build -x test \
+    -Dquarkus.package.jar.enabled=true \
+    -Dquarkus.otel.enabled=false
+
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+COPY --from=build /app/build/quarkus-app /app
+EXPOSE 8080
+ENTRYPOINT ["java", "-Dquarkus.http.host=0.0.0.0", "-Dquarkus.otel.enabled=false", "-jar", "/app/quarkus-run.jar"]

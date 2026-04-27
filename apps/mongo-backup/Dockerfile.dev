@@ -1,0 +1,26 @@
+# DEV ONLY -- Quarkus fast-jar build (no native).
+# Build context: apps/mongo-backup. Dockerfile path: Dockerfile.dev.
+# See apps/viewer/Dockerfile.dev for full rationale.
+#
+# mongo-backup doesn't depend on libs/schema, so this Dockerfile keeps the
+# narrow per-service build context (no monorepo-root needed).
+
+FROM eclipse-temurin:21-jdk AS build
+WORKDIR /app
+COPY . .
+RUN sed -i 's/\r$//' ./gradlew && chmod +x ./gradlew
+
+ARG MONGO_URI
+ARG OTEL_URI
+ENV MONGO_URI=${MONGO_URI}
+ENV OTEL_URI=${OTEL_URI}
+
+RUN ./gradlew clean build -x test \
+    -Dquarkus.package.jar.enabled=true \
+    -Dquarkus.otel.enabled=false
+
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+COPY --from=build /app/build/quarkus-app /app
+EXPOSE 8080
+ENTRYPOINT ["java", "-Dquarkus.http.host=0.0.0.0", "-Dquarkus.otel.enabled=false", "-jar", "/app/quarkus-run.jar"]

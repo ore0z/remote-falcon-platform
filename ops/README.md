@@ -67,11 +67,28 @@ Direct service ports (bypass nginx):
 | account-archive | 8086 | platform only |
 | gateway | 8087 | platform only |
 
+## Dev builds use JVM, not native
+
+Each service has two Dockerfiles:
+
+| File | Used by | Build target |
+|---|---|---|
+| `apps/<svc>/Dockerfile` | Prod (CI workflows) | GraalVM native image |
+| `apps/<svc>/Dockerfile.dev` | This Compose stack | JVM jar (Spring) or Quarkus fast-jar |
+
+Native-image generation for these services takes 15–60 min per compile and needs 8–16 GB RAM. Unworkable for local inner-loop development. The `.dev` variants produce identical application semantics — same Java code, same classpath, same runtime — only cold-start time and runtime memory profile differ. Prod still ships native binaries.
+
+`ui` and `gateway` don't have a `.dev` variant: ui's build is npm-based, gateway is already JVM. Both build the same way in dev and prod.
+
 ## First build is slow
 
-The Quarkus services (`viewer`, `plugins-api`, `account-archive`, `mongo-backup`) compile to GraalVM native images — 5–10 minutes per service. Stack-wide initial build is 30+ minutes in platform mode, meaningfully faster in core mode (5 services instead of 9). Subsequent builds cache.
+Even in JVM mode, first builds take time:
+- Maven services (control-panel, external-api): ~2–3 min each on first build, ~30s incremental
+- Quarkus services (viewer, plugins-api, account-archive, mongo-backup): ~1–2 min each on first build, ~20s incremental
 
-For tight inner-loop work on a single service, prefer running that service natively (`./gradlew quarkusDev`, `mvn spring-boot:run`, `npm run dev`) against the dockerized Mongo at `localhost:27017`. Skips the native-image build entirely.
+Stack-wide initial build is ~10 min in platform mode, ~5 min in core. Subsequent builds cache.
+
+For tight inner-loop work on a single service, prefer running that service natively (`./gradlew quarkusDev`, `mvn spring-boot:run`, `npm run dev`) against the dockerized Mongo at `localhost:27017`. Skips the Docker build entirely.
 
 ## Bootstrap order for monorepo builds
 

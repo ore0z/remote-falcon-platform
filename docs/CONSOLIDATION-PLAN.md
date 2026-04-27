@@ -129,6 +129,12 @@ remote-falcon-platform/
     - `docker-compose.dev.yml` build contexts for those 5 services updated from `../apps/<svc>` to `..` with explicit `dockerfile: apps/<svc>/Dockerfile`. The 3 unaffected services (`ui`, `gateway`, `mongo-backup`) keep their narrow `../apps/<svc>` context.
     - Added a monorepo-root `.dockerignore` to keep build contexts lean (`.git`, build outputs, IDE files, planning docs, baselines, operator scripts).
     - **Net effect:** the same Dockerfile pattern Phase B's unified CI workflow will need is in place now, so A4 verification can actually succeed.
+  - **Dev/prod build split** (added 2026-04-27 after A4 verification surfaced unworkable native-build memory + runtime cost on aarch64):
+    - Issue [#3](https://github.com/Remote-Falcon/remote-falcon-platform/issues/3) tracked the problem; this commit closes it.
+    - Each service that previously built native now has a sibling `Dockerfile.dev` that builds a JVM jar (Spring) or Quarkus fast-jar instead. Prod still uses the canonical `Dockerfile` (native).
+    - `ops/docker-compose.dev.yml` switched to the `.dev` variants for control-panel, external-api, viewer, plugins-api, account-archive, mongo-backup. ui and gateway need no .dev variant — ui is npm, gateway is already JVM.
+    - Build time per service drops from 15–60 min (native) to 1–3 min (JVM). Docker memory floor drops from 12–16 GB to ~4 GB.
+    - Phase B's unified CI workflow will use the prod Dockerfiles (native) for actual deploys.
 
 - [ ] **A4. Verify locally.** `./ops/dev-up.sh up && ./ops/dev-up.sh health` — every service must come up green. **This is the cutover gate.**
 
