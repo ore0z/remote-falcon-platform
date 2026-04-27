@@ -1,9 +1,11 @@
 # Remote Falcon — Services & Deployment Reference
 
-**Last updated:** 2026-04-25
+**Last updated:** 2026-04-27
 **Maintainer:** Matt Shorts (taking over from prior maintainer)
 
 This is the operator's map of the Remote Falcon stack: every service, what it does, where it runs, and the secrets / cluster prerequisites it needs.
+
+> **Consolidation status:** This stack is mid-migration to a single monorepo. See [CONSOLIDATION-PLAN.md](CONSOLIDATION-PLAN.md) for the active phase. Until Phase A completes, the per-service deploy mechanics described below remain authoritative.
 
 ---
 
@@ -31,7 +33,7 @@ This is the operator's map of the Remote Falcon stack: every service, what it do
 | **Image registry** | GHCR — `ghcr.io/remote-falcon/<service>:<git-sha>` |
 | **Image pull secret** | `remote-falcon-ghcr` (in `remote-falcon` namespace) |
 | **Metrics** | Prometheus via `kube-prometheus-stack-1768012917` (ServiceMonitors on viewer + plugins-api) |
-| **APM / logs** | Datadog Operator (installed via `remote-falcon-data/k8s/datadog-agent.yaml`) |
+| **APM / logs** | **Not currently active.** `viewer` and `plugins-api` manifests carry `ad.datadoghq.com/...` autodiscovery annotations, but the Datadog Operator is **not installed** on the cluster (no `DatadogAgent` CRD; no agent pods). The annotations are inert. See [OBSERVABILITY-PLAN.md](OBSERVABILITY-PLAN.md) for the planned replacement. |
 
 ---
 
@@ -51,6 +53,7 @@ This is the operator's map of the Remote Falcon stack: every service, what it do
 | **GH Actions secrets** | `VIEWER_JWT_KEY`, `GOOGLE_MAPS_KEY`, `PUBLIC_POSTHOG_KEY`, `GA_TRACKING_ID`, `MIXPANEL_KEY`, `CLARITY_PROJECT_ID`, `DIGITALOCEAN_ACCESS_TOKEN` |
 | **In-cluster secrets** | none (all config is build-time `VITE_*` env) |
 | **Note** | All third-party keys are **baked into the bundle at image build time** — rotate by re-running the workflow, not by restarting pods. |
+| **⚠ Dead config (verified 2026-04-27)** | `MIXPANEL_KEY`, `GA_TRACKING_ID`, and `CLARITY_PROJECT_ID` are still plumbed through Dockerfile build-args, GH Actions secrets, and `VITE_*` env vars, **but nothing reads them in source**. Only `posthog-js` (`VITE_PUBLIC_POSTHOG_KEY`) is actually wired in `apps/ui/src/`. Removing the dead chain is a no-op simplification, captured in [OBSERVABILITY-PLAN.md](OBSERVABILITY-PLAN.md) Obs-2. `VIEWER_JWT_KEY` is similarly absent from source — verify intent before relying on it. |
 
 ### 2. remote-falcon-gateway
 | | |
@@ -94,7 +97,7 @@ This is the operator's map of the Remote Falcon stack: every service, what it do
 | **Talks to** | MongoDB |
 | **GH Actions secrets** | `MONGO_URI` (build-arg, baked into native image), `DIGITALOCEAN_ACCESS_TOKEN` |
 | **In-cluster secret** | `mongodb-connection` — key: `MONGO_URI` |
-| **Observability** | Datadog log annotation; Prometheus `ServiceMonitor` exposes `/remote-falcon-viewer/q/metrics` |
+| **Observability** | Prometheus `ServiceMonitor` exposes `/remote-falcon-viewer/q/metrics`. Datadog log annotation present in manifest but **inert** (operator not installed — see Cluster topology). |
 | **Note** | The build bakes `MONGO_URI` into the native image — rotating Mongo creds requires a rebuild, not just a Secret update. |
 
 ### 5. remote-falcon-plugins-api
@@ -110,7 +113,7 @@ This is the operator's map of the Remote Falcon stack: every service, what it do
 | **Talks to** | MongoDB |
 | **GH Actions secrets** | `MONGO_URI` (build-arg), `DIGITALOCEAN_ACCESS_TOKEN` |
 | **In-cluster secret** | `mongodb-connection` — key: `MONGO_URI` |
-| **Observability** | Datadog log annotation; Prometheus `ServiceMonitor` exposes `/q/metrics` |
+| **Observability** | Prometheus `ServiceMonitor` exposes `/q/metrics`. Datadog log annotation present in manifest but **inert** (operator not installed). |
 
 ### 6. remote-falcon-external-api
 | | |
@@ -236,14 +239,16 @@ These ship code that runs *outside* the production cluster — on FPP show contr
 
 ### Operator / tooling
 
-#### remote-falcon-deployment-wizard (private)
+#### remote-falcon-deployment-wizard (private) — **NOT YET PUBLISHED 2026-04-27**
+> In-development; not currently shipping to customers. Listed here so it's tracked when it does ship.
+
 | | |
 |---|---|
 | **Purpose** | Customer-installable one-click deployer — Node/Express + WebSocket UI on `localhost:3030` that walks a user through a Docker / DigitalOcean deployment. |
 | **Stack** | Node, Express 4, `ws`. Frontend in `wizard/index.html`. Has its own `Dockerfile.local` plus three compose files (`docker-compose.yaml`, `docker-compose.local.yml`, `docker-compose-test.yaml`) and `deploy.sh` / `redeploy.sh`. Launched via `run-wizard.sh` (Mac/Linux) or `run-wizard.bat` (Windows). |
 | **Tests / CI** | None. |
 | **Last commit** | 2025-10-16 |
-| **Risk** | Runs on customer machines and provisions cloud resources on their account. Bugs here turn into customer-support tickets, not pages — but they still spend the customer's money. |
+| **Risk (when published)** | Runs on customer machines and provisions cloud resources on their account. Bugs here turn into customer-support tickets, not pages — but they still spend the customer's money. |
 
 #### remote-falcon-deployment-electron (private)
 **Empty repo** — only `LICENSE` + `.gitignore`. "Initial commit" 2025-10-17. Likely placeholder for a future Electron wrapper around the deployment wizard.
@@ -257,7 +262,9 @@ Public companion repo to <https://docs.remotefalcon.com/docs/developer-docs/welc
 #### remote-falcon-mcp
 **Empty repo** — only `LICENSE` + a 45-byte `README.md`. 2025-08-26 placeholder for a future MCP server. Nothing to deploy.
 
-#### remote-falcon-mobile (private)
+#### remote-falcon-mobile (private) — **ARCHIVED 2026-04-27**
+> Repo archived; not currently maintained. Listed here for historical context so future-you doesn't wonder why a grayed-out repo with this name appears in the org.
+
 Expo / React Native app (Expo Router, Apollo Client, Redux Toolkit, RN Paper). ~23 `.tsx` files in `app/`. Pre-build artifacts (`android/`, `ios/`) committed; distributed via EAS (`eas.json`). Not a server-side concern. Last commit 2025-04-14.
 
 #### remote-falcon-issue-tracker
@@ -274,7 +281,7 @@ Empty remote — clones with `warning: You appear to have cloned an empty reposi
 2. **DNS:** `remotefalcon.com` and `*.remotefalcon.com` → ingress LB.
 3. **nginx ingress controller** installed.
 4. **kube-prometheus-stack** installed with release name `kube-prometheus-stack-1768012917` (or update the label in `viewer` + `plugins-api` ServiceMonitors).
-5. **Datadog Operator** installed; create `datadog-secret` with key `api-key`; then apply `remote-falcon-data/k8s/datadog-agent.yaml`.
+5. **Datadog Operator** — **NOT installed on the current cluster** (verified 2026-04-27). The original bring-up step would have installed it, created `datadog-secret` with key `api-key`, then applied `remote-falcon-data/k8s/datadog-agent.yaml`. Per [OBSERVABILITY-PLAN.md](OBSERVABILITY-PLAN.md) the cluster will move to Grafana Cloud + PostHog instead; **do not** install Datadog as part of a fresh bring-up. The `ad.datadoghq.com/...` annotations on `viewer` and `plugins-api` manifests are inert without the operator and can be removed during the observability rollout.
 6. **Namespace `remote-falcon`** created (each service's manifest also creates it idempotently).
 7. **GHCR image pull secret** `remote-falcon-ghcr` created in the `remote-falcon` namespace.
 8. **In-cluster Secrets** populated (see [Secrets matrix](#secrets-matrix) below).

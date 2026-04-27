@@ -1,8 +1,8 @@
 # Remote Falcon — Testing Audit & Improvement Plan
 
-**Audit date:** 2026-04-25
-**Scope:** All 8 production services in `~/rf-build/`, plus the 14 adjacent repos in the Remote-Falcon GitHub org (shared library, customer-facing artifacts, operator tooling).
-**Method:** Three parallel agents inventoried test files, frameworks, coverage tooling, CI integration, and risk areas across the production services. The "Adjacent repos coverage" section was added 2026-04-25 after the rest of the org's repos were cloned locally.
+**Audit date:** 2026-04-25 (counts re-verified 2026-04-27 against the consolidated monorepo)
+**Scope:** All 8 production services (now under `apps/` in the monorepo), plus adjacent repos in the Remote-Falcon GitHub org (shared library, customer-facing artifacts, operator tooling).
+**Method:** Three parallel agents inventoried test files, frameworks, coverage tooling, CI integration, and risk areas across the production services. The "Adjacent repos coverage" section was added 2026-04-25 after the rest of the org's repos were cloned locally. The 2026-04-27 re-verification corrected the plugins-api test count (56/3, not 58/4 — the 4th file is a `MongoTestResource` fixture, not a test class) and added the dead UI analytics-config finding.
 
 ---
 
@@ -17,7 +17,7 @@
 | **Coverage thresholds enforced** | 0 |
 | **Contract / integration tests across services** | 0 |
 | **Native-image smoke tests** | 0 (and 6 of 8 services ship as GraalVM native images) |
-| **Adjacent repos with tests** | 0 of the in-scope ones — `remote-falcon-library` (the canonical Mongo schema for 5 services), `remote-falcon-plugin` (FPP plugin running on every customer's controller), `remote-falcon-viewer-page-js` (CDN scripts running in every viewer browser), `remote-falcon-deployment-wizard`, and `remote-falcon-mobile` all have **zero** test coverage |
+| **Adjacent repos with tests** | 0 of the in-scope ones — `remote-falcon-library` (the canonical Mongo schema for 5 services), `remote-falcon-plugin` (FPP plugin running on every customer's controller), and `remote-falcon-viewer-page-js` (CDN scripts running in every viewer browser) all have **zero** test coverage. `remote-falcon-deployment-wizard` (not yet published) and `remote-falcon-mobile` (archived) also have zero — relevant when those re-enter scope. |
 
 The riskiest services are the worst-tested: `mongo-backup` (silent backup failure = no recoverable data) and `account-archive` (deletes customer accounts) both have **zero** tests. The control-panel — the entire auth surface and integration hub — has 4,000+ lines of test code, all of it commented out, referencing a previous package layout.
 
@@ -28,7 +28,7 @@ The riskiest services are the worst-tested: `mongo-backup` (silent backup failur
 | Service | Stack | Source classes | Active test classes | `@Test` methods | JaCoCo | Sonar | CI test step |
 |---|---|---:|---:|---:|:---:|:---:|:---:|
 | remote-falcon-viewer | Quarkus 21 native | 11 | 9 | 88 | ✓ | ✓ | (no enforcement) |
-| remote-falcon-plugins-api | Quarkus 21 native | 17 | 4 | 58 | ✓ | ✓ | (no enforcement) |
+| remote-falcon-plugins-api | Quarkus 21 native | 17 | 3 | 56 | ✓ | ✓ | (no enforcement) |
 | remote-falcon-account-archive | Quarkus 21 native | 2 | **0** | 0 | ✗ | ✗ | ✗ |
 | remote-falcon-mongo-backup | Quarkus 21 native | 2 | **0** | 0 | ✗ | ✗ | ✗ |
 | remote-falcon-control-panel | Spring Boot 3 / Java 21 native | 57 | **0** *(6 commented-out files, ~4k LOC)* | 0 | ✗ | ✗ | ✗ |
@@ -44,26 +44,26 @@ The riskiest services are the worst-tested: `mongo-backup` (silent backup failur
 
 The 8 production services aren't the whole picture. Several other repos in the Remote-Falcon org ship code that runs in production — on customer FPPs, in viewer browsers, or as a build-time dependency of multiple services — and none of them have any test coverage either.
 
-| Repo | Stack | What it ships | Tests | CI test step |
-|---|---|---|---:|:---:|
-| `remote-falcon-library` | Maven / Java 17 (Spring Data + Quarkus Panache) | Shared MongoDB schema (`Show`, `Wattson`, `Notification`, etc.), pulled at a pinned git SHA via JitPack by 5 of 8 services | **0** *(no `src/test`)* | ✗ *(no `.github/workflows`)* |
-| `remote-falcon-plugin` | PHP + JS + shell | FPP plugin installed on customer show controllers (~975 LOC); talks to `plugins-api` | **0** | ✗ |
-| `remote-falcon-viewer-page-js` | Plain JS | 6 CDN-served scripts (snow, countdowns, dynamic menu) executed in viewer browsers | **0** | ✗ |
-| `remote-falcon-page-templates` | Static HTML | 6 default viewer-page templates seeded by `control-panel` | **0** | ✗ |
-| `remote-falcon-maintenance-mode` | Static HTML | Maintenance landing page | n/a | n/a |
-| `remote-falcon-deployment-wizard` | Node / Express | Customer-installable deployer (`localhost:3030`); provisions cloud resources | **0** | ✗ |
-| `remote-falcon-mobile` | Expo / React Native (Expo Router, Apollo, Redux Toolkit) | Mobile companion app (~23 `.tsx` screens), distributed via EAS | **0** *(`jest-expo` preset declared, no test files)* | ✗ |
-| `remote-falcon-viewer-quarkus` | Quarkus / Java 21 | Dormant viewer rewrite (Feb 2025) on a separate cluster | 1 *(auto-generated `ExampleResourceTest`)* | ✗ |
-| `remote-falcon-data` | k6 + JMeter + kind scripts | Load tests + cluster bootstrap + manually-applied Datadog/secret manifests | n/a *(this repo is itself test infra)* | ✗ |
-| `remote-falcon-load-tests` | k6 + Node + `mongodb` driver | Viewer GraphQL smoke + data-integrity scripts | n/a *(this repo is itself test infra)* | ✗ |
+| Repo | Stack | What it ships | Tests | CI test step | Status |
+|---|---|---|---:|:---:|---|
+| `remote-falcon-library` | Maven / Java 17 (Spring Data + Quarkus Panache) | Shared MongoDB schema (`Show`, `Wattson`, `Notification`, etc.), pulled at a pinned git SHA via JitPack by 5 of 8 services | **0** *(no `src/test`)* | ✗ *(no `.github/workflows`)* | — |
+| `remote-falcon-plugin` | PHP + JS + shell | FPP plugin installed on customer show controllers (~975 LOC); talks to `plugins-api` | **0** | ✗ | Active |
+| `remote-falcon-viewer-page-js` | Plain JS | 6 CDN-served scripts (snow, countdowns, dynamic menu) executed in viewer browsers | **0** | ✗ | Active |
+| `remote-falcon-page-templates` | Static HTML | 6 default viewer-page templates seeded by `control-panel` | **0** | ✗ | Active |
+| `remote-falcon-maintenance-mode` | Static HTML | Maintenance landing page | n/a | n/a | Active |
+| `remote-falcon-deployment-wizard` | Node / Express | Customer-installable deployer (`localhost:3030`); provisions cloud resources | **0** | ✗ | **Not yet published** (2026-04-27) |
+| `remote-falcon-mobile` | Expo / React Native (Expo Router, Apollo, Redux Toolkit) | Mobile companion app (~23 `.tsx` screens), distributed via EAS | **0** *(`jest-expo` preset declared, no test files)* | ✗ | **Archived** (2026-04-27) |
+| `remote-falcon-viewer-quarkus` | Quarkus / Java 21 | Dormant viewer rewrite (Feb 2025) on a separate cluster | 1 *(auto-generated `ExampleResourceTest`)* | ✗ | Dormant |
+| `remote-falcon-data` | k6 + JMeter + kind scripts | Load tests + cluster bootstrap + manually-applied Datadog/secret manifests | n/a *(this repo is itself test infra)* | ✗ | **Retiring** (Phase E6) |
+| `remote-falcon-load-tests` | k6 + Node + `mongodb` driver | Viewer GraphQL smoke + data-integrity scripts | n/a *(this repo is itself test infra)* | ✗ | Active |
 
 **Highest-risk findings here:**
 
 - **`remote-falcon-library` has zero tests and is the canonical Mongo schema for 5 services.** All 5 currently pin to the same SHA (`a5703a28fe`), so they agree by accident — but nothing protects that. A field rename or default change here can silently desync any one service that bumps without the others, with no contract test to catch it. **Highest-leverage untested repo in the entire org.**
 - **`remote-falcon-plugin` is the only un-version-pinned wire-format contract in production.** Customers run whatever version they last installed; `plugins-api` accepts requests from all of them. There's nothing testing that `plugins-api` still serves the older plugin shapes.
 - **`remote-falcon-viewer-page-js` runs in real customers' viewer pages from `master`.** No version pinning on the customer side; a revert on `master` is the only rollback path.
-- **`remote-falcon-deployment-wizard` provisions DigitalOcean infra on customer accounts.** Bugs here cost customers real money (wrong-region or oversized droplets) and surface as support tickets, not pages.
-- **`remote-falcon-mobile` declares `jest-expo` but ships no tests.** The whole mobile experience (auth, viewer, push) is untested today.
+- **`remote-falcon-deployment-wizard` provisions DigitalOcean infra on customer accounts** when published. Bugs there will cost customers real money (wrong-region or oversized droplets) and surface as support tickets, not pages. Currently not yet published as of 2026-04-27 — but the repo is in development, so the gap is worth filling before launch.
+- ~~**`remote-falcon-mobile` declares `jest-expo` but ships no tests.**~~ Repo archived 2026-04-27; no longer in scope.
 
 ---
 
@@ -77,9 +77,9 @@ The 8 production services aren't the whole picture. Several other repos in the R
 - **Highest-traffic service in the stack — and there's no load test.**
 
 ### remote-falcon-plugins-api ✓ *(credibly tested, but unenforced)*
-- 58 `@Test` methods across 4 classes; every named REST endpoint has at least a happy-path test plus a Mongo-testcontainers integration suite.
+- 56 `@Test` methods across 3 classes (`PluginControllerTest` 15, `PluginControllerIntegrationTest` 19, `PluginServiceTest` 22); a 4th file `MongoTestResource` is a testcontainers fixture, not a test class. Every named REST endpoint has at least a happy-path test plus a Mongo-testcontainers integration suite.
 - **`ShowTokenFilter` (the only authn boundary, 63 LOC) has no dedicated test** — only indirectly hit via integration.
-- 789-LOC `PluginService`: 23 service-layer tests are thin per-LOC; error/boundary branches likely under-tested.
+- 789-LOC `PluginService`: 22 service-layer tests are thin per-LOC; error/boundary branches likely under-tested.
 
 ### remote-falcon-account-archive ✗ *(0 tests, deletes data)*
 - 2 source classes; one is a scheduled job that archives/deletes show accounts.
@@ -124,7 +124,8 @@ The 8 production services aren't the whole picture. Several other repos in the R
 5. **No load / performance tests** on viewer or plugins-api.
 6. **The Spring services have aspirational test deps** (WireMock, Testcontainers, REST Assured) that are declared and unused — and now obscure the fact that nothing runs.
 7. **Deploy → prod has no smoke test.** A failed start, a crash-loop, a 500-on-every-request — all only caught when a user complains.
-8. **Customer-installed code has no automated guardrails.** The FPP plugin (`remote-falcon-plugin`), the CDN-served viewer scripts (`remote-falcon-viewer-page-js`), and the deployment wizard (`remote-falcon-deployment-wizard`) all ship to end users from `master` with no tests, no CI, and no version pinning on the consumer side.
+8. **Customer-installed code has no automated guardrails.** The FPP plugin (`remote-falcon-plugin`) and the CDN-served viewer scripts (`remote-falcon-viewer-page-js`) ship to end users from `master` with no tests, no CI, and no version pinning on the consumer side. The deployment wizard (`remote-falcon-deployment-wizard`) is in the same shape but is **not yet published** as of 2026-04-27.
+9. **The UI ships ~600 lines of dead third-party-analytics plumbing.** `MIXPANEL_KEY`, `GA_TRACKING_ID`, and `CLARITY_PROJECT_ID` are still threaded through GH Actions secrets → Dockerfile build-args → `VITE_*` env vars, but **nothing reads them in `apps/ui/src/`** (verified 2026-04-27). Only `posthog-js` is actually wired in. Removing the dead chain is a no-op simplification, planned in OBSERVABILITY-PLAN Obs-2. `VIEWER_JWT_KEY` is similarly absent from source — flagged for verification before removal.
 
 ---
 
