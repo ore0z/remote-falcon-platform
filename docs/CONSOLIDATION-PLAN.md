@@ -20,7 +20,7 @@
 | Phase | Status | Started | Completed | Notes |
 |---|---|---|---|---|
 | 0: Pre-work | ✅ Complete | 2026-04-27 | 2026-04-27 | Tags pushed to all 10 repos; baseline captured; `developer-files` migration risk surfaced |
-| A: Monorepo cutover | ☐ Not started | | | |
+| A: Monorepo cutover | 🚧 In progress | 2026-04-27 | | A1 (subtree-merge) ✓; A2 (JitPack→local module) ✓; A3–A7 pending |
 | B: Unified CI | ☐ Not started | | | |
 | C: Test pyramid | ☐ Not started | | | |
 | D: Service merges | ☐ Not started | | | |
@@ -97,26 +97,19 @@ remote-falcon-platform/
   ```
   Squash to keep history readable; full history stays in the archived source repos if you ever need it.
 
-- [ ] **A2. Replace JitPack with the local module.**
-  - **Maven services** (`control-panel`, `external-api`):
-    ```xml
-    <!-- remove this -->
-    <dependency>
-      <groupId>com.github.Remote-Falcon</groupId>
-      <artifactId>remote-falcon-library</artifactId>
-      <version>a5703a28fe</version>
-    </dependency>
-    ```
-    Add a root `pom.xml` declaring `libs/schema`, `apps/control-panel`, `apps/external-api` as modules.
-  - **Gradle services** (`viewer`, `plugins-api`, `account-archive`):
-    ```groovy
-    // remove
-    implementation 'com.github.Remote-Falcon:remote-falcon-library:a5703a28fe'
-    // add
-    implementation project(':libs:schema')
-    ```
-    Add a root `settings.gradle` with `include 'libs:schema', 'apps:viewer', 'apps:plugins-api', 'apps:account-archive', 'apps:mongo-backup'`.
-  - Maven and Gradle services stay in their own build trees — no need to unify the build tools yet.
+- [x] **A2. Replace JitPack with the local module.** *(completed 2026-04-27)*
+  - **Maven aggregator** at root `pom.xml` registers `libs/schema`, `apps/control-panel`, `apps/external-api` as modules. `mvn install` from the repo root builds in dependency order.
+  - **Maven consumers** (`control-panel`, `external-api`) updated:
+    - `<dependency>` changed from `com.github.Remote-Falcon:remote-falcon-library:a5703a28fe` → `com.remotefalcon:remote-falcon-library:1.0.0-LOCAL` (matches `libs/schema/pom.xml`'s existing identity)
+    - `<repositories>` JitPack block removed
+    - Existing `<exclusions>` preserved
+  - **Gradle consumers** (`viewer`, `plugins-api`, `account-archive`) updated:
+    - `implementation` coordinate updated to the same `com.remotefalcon:remote-falcon-library:1.0.0-LOCAL`
+    - `maven { url 'https://jitpack.io' }` removed; `mavenLocal()` (already present) is now the resolution path
+    - Existing exclusions preserved
+    - `quarkus.index-dependency.remote-falcon-library.group-id` updated from `com.github.Remote-Falcon` → `com.remotefalcon`
+  - **Bootstrap order:** Gradle services require `mvn install -pl libs/schema -am` to run first (since they consume the lib via `mavenLocal()`, not a Gradle composite). Documented in the monorepo root README.
+  - **Deferred:** the originally-planned Gradle composite (`include 'libs:schema', 'apps:viewer', ...`) is **not** in this phase. Reason: `libs/schema` is a Maven project; making Gradle's `include` directive resolve it cleanly would require either duplicating dep info into a `build.gradle` or restructuring the lib. Left for Phase B (unified CI), where the workflow already runs `mvn install` before `./gradlew build` anyway.
 
 - [ ] **A3. Update `dev-up.sh` paths.** Build contexts in `docker-compose.dev.yml` change from `./remote-falcon-ui` to `./apps/ui` etc. The `.env.dev` interface stays identical.
 
@@ -385,3 +378,5 @@ Pick based on what hurts most.
 |---|---|---|
 | 2026-04-26 | Initial plan drafted | Matt + Claude session |
 | 2026-04-27 | Phase 0 executed: 10 tags pushed, baseline captured, repo strategy decided, `developer-files` migration risk added to A7 | Matt + Claude session |
+| 2026-04-27 | Phase A1 executed: monorepo created at `Remote-Falcon/remote-falcon-platform` (private); 8 services + library subtree-merged with squashed history | Matt + Claude session |
+| 2026-04-27 | Phase A2 executed: root Maven aggregator pom.xml added; all 5 consumers switched from JitPack `com.github.Remote-Falcon:...:a5703a28fe` → local `com.remotefalcon:remote-falcon-library:1.0.0-LOCAL`; Gradle composite deferred to Phase B | Matt + Claude session |

@@ -39,7 +39,26 @@ If you change something that affects deploy mechanics, secrets, test counts, or 
 
 ## Status
 
-Consolidation in progress. Currently in **Phase A** of [`docs/CONSOLIDATION-PLAN.md`](docs/CONSOLIDATION-PLAN.md) — services have been imported via subtree-merge and the per-service workflows are still in place. Phases B (unified CI), C (test pyramid), D (service merges), and E (observability + cleanup) follow.
+Consolidation in progress. Currently in **Phase A** of [`docs/CONSOLIDATION-PLAN.md`](docs/CONSOLIDATION-PLAN.md) — services have been imported via subtree-merge, JitPack has been replaced with the local `libs/schema` module, and the per-service workflows are still in place. Phases B (unified CI), C (test pyramid), D (service merges), and E (observability + cleanup) follow.
+
+## Build order (Phase A interim)
+
+Because Gradle and Maven services share `libs/schema`, but the Gradle services consume it via `mavenLocal()` for now (full Gradle composite is deferred to Phase B):
+
+```bash
+# Install libs/schema into the local Maven repo first
+mvn install -pl libs/schema -am
+
+# After that, any of:
+mvn -pl apps/control-panel package         # Maven consumer
+mvn -pl apps/external-api package          # Maven consumer
+cd apps/viewer && ./gradlew build          # Gradle consumer (resolves schema from mavenLocal)
+cd apps/plugins-api && ./gradlew build     # Gradle consumer
+cd apps/account-archive && ./gradlew build # Gradle consumer
+cd apps/mongo-backup && ./gradlew build    # Gradle non-consumer (no install step needed)
+```
+
+The local Compose stack (`./dev-up.sh up` — landing in `ops/` in [Phase A3](docs/CONSOLIDATION-PLAN.md)) wraps this for full-stack development.
 
 ## Customer-facing repos (out-of-tree)
 

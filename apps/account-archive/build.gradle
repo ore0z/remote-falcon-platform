@@ -6,9 +6,6 @@ plugins {
 repositories {
     mavenCentral()
     mavenLocal()
-    maven {
-        url 'https://jitpack.io'
-    }
 }
 
 dependencies {
@@ -16,7 +13,7 @@ dependencies {
     implementation 'io.quarkus:quarkus-mongodb-panache'
     implementation 'io.quarkus:quarkus-scheduler'
     implementation 'io.quarkus:quarkus-arc'
-    implementation ('com.github.Remote-Falcon:remote-falcon-library:a5703a28fe') {
+    implementation ('com.remotefalcon:remote-falcon-library:1.0.0-LOCAL') {
         exclude group: "org.springframework.boot", module: "spring-boot-starter-data-mongodb"
     }
     implementation 'io.quarkus:quarkus-opentelemetry'

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.remotefalcon</groupId>
+    <artifactId>platform</artifactId>
+    <version>1.0.0-LOCAL</version>
+    <packaging>pom</packaging>
+    <name>Remote Falcon Platform</name>
+    <description>Aggregator for Maven modules in the Remote Falcon monorepo. Run `mvn install` from this directory to build libs/schema first, then the Maven services in dependency order. Gradle services (viewer, plugins-api, account-archive, mongo-backup) live under apps/ but are not part of this reactor — they consume libs/schema via mavenLocal after a fresh `mvn install`.</description>
+
+    <modules>
+        <module>libs/schema</module>
+        <module>apps/control-panel</module>
+        <module>apps/external-api</module>
+    </modules>
+</project>
