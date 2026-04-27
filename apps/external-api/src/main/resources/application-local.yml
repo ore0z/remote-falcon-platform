@@ -1,0 +1,8 @@
+server:
+  port: 8084
+  servlet:
+    context-path: /remote-falcon-external-api
+
+viewer:
+  api:
+    url: http://localhost:8082/remote-falcon-viewer

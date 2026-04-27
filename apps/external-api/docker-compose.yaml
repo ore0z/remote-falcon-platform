@@ -1,0 +1,12 @@
+services:
+  external-api:
+    build:
+      context: .
+      args:
+        - OTEL_OPTS=
+    restart: always
+    ports:
+      - "8084:8084"
+      - "8004:8004"
+    environment:
+      - SPRING_PROFILES_ACTIVE=local

@@ -1,0 +1,103 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: #{Namespace}#
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: #{Application}#
+  namespace: #{Namespace}#
+  labels:
+    app: #{Application}#
+spec:
+  replicas: #{Replicas}#
+  selector:
+    matchLabels:
+      app: #{Application}#
+  template:
+    metadata:
+      labels:
+        app: #{Application}#
+    spec:
+      containers:
+      - name: #{Application}#
+        image: #{Image}#
+        resources:
+          requests:
+            memory: #{Requests.Memory}#
+            cpu: #{Requests.CPU}#
+          limits:
+            memory: #{Limits.Memory}#
+            cpu: #{Limits.CPU}#
+        ports:
+        - containerPort: 8080
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: #{Env}#
+        - name: SPRING_DATA_MONGODB_URI
+          valueFrom:
+            secretKeyRef:
+              name: remote-falcon-external-api
+              key: mongo-uri
+        startupProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          failureThreshold: 60
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 0
+          timeoutSeconds: 10
+          failureThreshold: 60
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          failureThreshold: 60
+          initialDelaySeconds: 0
+      imagePullSecrets:
+        - name: remote-falcon-ghcr
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: #{Application}#
+  namespace: #{Namespace}#
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+  selector:
+    app: #{Application}#
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: #{Application}#
+  namespace: #{Namespace}#
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: #{Host}#
+    http:
+      paths:
+      - pathType: ImplementationSpecific
+        path: /remote-falcon-external-api(/|$)(.*)
+        backend:
+          service:
+            name: #{Application}#
+            port:
+              number: 8080
+      - pathType: ImplementationSpecific
+        path: /remotefalcon/api/external(/|$)(.*)
+        backend:
+          service:
+            name: #{Application}#
+            port:
+              number: 8080
