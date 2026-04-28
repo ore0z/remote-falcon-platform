@@ -146,14 +146,28 @@ remote-falcon-platform/
     - **Profile-specific YAML for gateway + external-api:** both rely on properties not in base `application.yml` (services.* URIs / paths for gateway; viewer.api.url for external-api). Created `application-dev.yml` in each — the prod sibling `application-prod.yml` already exists, this is the standard Spring profile-config pattern.
     - **Gateway health check route:** `dev-up.sh health` was hitting gateway via dev-nginx at `/remote-falcon-gateway/actuator/health`, but gateway's actuator lives at `/actuator/health` (no prefix) — the prefix is for SCG's own routing predicates. Updated the health probe to hit gateway directly on its mapped port (8087), mirroring how kubelet hits the pod in prod.
 
-- [ ] **A5. Copy the 8 existing workflows verbatim** into `.github/workflows/`, renaming to `<service>-deploy.yml`. Add `paths:` filters so each only fires when its service changes:
-  ```yaml
-  on:
-    push:
-      branches: [main]
-      paths: ['apps/ui/**', 'libs/schema/**']  # for ui-deploy.yml
-  ```
-  Library-consuming services include `libs/schema/**`.
+- [x] **A5. Unified deploy workflow.** *(completed 2026-04-27 — went straight to the matrix design instead of the originally-planned "copy 8 workflows verbatim" interim step. Same end state, half the work, no rework.)*
+  - **`.github/workflows/deploy.yml`** at repo root: single workflow, two jobs.
+    - `detect`: `dorny/paths-filter@v3` for push events; `workflow_dispatch` input for manual. Outputs JSON array of service names to deploy. `libs/schema/**` triggers all 5 schema consumers automatically.
+    - `deploy`: matrices over the detected services. Each matrix entry runs a `cfg` step that resolves per-service config (build context, dockerfile path, image tag, replicas, resource limits) via a single shell `case` statement, then 4 `if:`-gated build-and-push steps for the 4 distinct build-arg patterns (ui / gateway / Quarkus-with-Mongo / Spring-no-args), then the common token-replace + `kubectl apply` + rollout monitor.
+  - **Cluster ID, registry, namespace** live in the workflow `env:` block — one place to change them.
+  - **Image tag**: `ghcr.io/<owner-lowercased>/remote-falcon-<svc>:<sha>`. Same per-service shape the original workflows used, scoped to the platform repo's owner.
+  - **10 inert workflow files removed** from `apps/*/.github/workflows/` (came in via subtree-merge; GitHub only reads workflows from repo root, so they weren't running — just clutter).
+  - **GitHub Actions secrets matrix** for the platform repo (configure under Settings → Secrets and variables → Actions before first deploy):
+
+    | Secret | Used by | Notes |
+    |---|---|---|
+    | `DIGITALOCEAN_ACCESS_TOKEN` | All services (kubeconfig save) | Required |
+    | `MONGO_URI` | viewer, plugins-api, mongo-backup, account-archive (build-arg) | Required for those builds |
+    | `OTEL_URI` | Same 4 (build-arg) | Empty string is fine; matches the prod default |
+    | `VIEWER_JWT_KEY` | UI build-arg | Required |
+    | `GOOGLE_MAPS_KEY` | UI build-arg | Required |
+    | `PUBLIC_POSTHOG_KEY` | UI build-arg | Required |
+    | `GA_TRACKING_ID` | UI build-arg | Dead per [#1](https://github.com/Remote-Falcon/remote-falcon-platform/issues/1); kept for parity until #1 lands |
+    | `MIXPANEL_KEY` | UI build-arg | Same as above |
+    | `CLARITY_PROJECT_ID` | UI build-arg | Same as above |
+
+    `GITHUB_TOKEN` is auto-provided. Source values live in the existing per-service repos' Actions secrets.
 
 - [ ] **A6. Switch GHCR image source.** Images push to `ghcr.io/<your-org>/remote-falcon-<service>` from the new repo; `kubectl set image` is used as a one-time bridge so existing pods pull from the new image path. Confirm pod restart succeeds in cluster.
 
