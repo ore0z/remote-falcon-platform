@@ -1,0 +1,271 @@
+name: Deploy
+
+# One workflow for all 8 services. detect job decides which services changed
+# (or which the user picked via workflow_dispatch); deploy job runs in a matrix
+# with per-service config resolved by a shell case statement and per-pattern
+# build steps gated by `if:`.
+#
+# Supersedes the 8 per-repo build-and-release.yml files that subtree-merged
+# into apps/<svc>/.github/workflows/ — those are inert (GitHub only reads
+# .github/workflows/ from repo root) and have been deleted in this commit.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Which service to deploy (or "all")
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - ui
+          - gateway
+          - control-panel
+          - viewer
+          - plugins-api
+          - external-api
+          - mongo-backup
+          - account-archive
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  CLUSTER_ID: 4f1406fe-1179-4a9c-9d2e-835c3da34984
+  REGISTRY: ghcr.io
+  NAMESPACE: remote-falcon
+
+jobs:
+  # ---------------------------------------------------------------
+  # detect — decide which services to (re)deploy this run
+  # ---------------------------------------------------------------
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.compute.outputs.services }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: changed
+        if: github.event_name == 'push'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ui: ['apps/ui/**']
+            gateway: ['apps/gateway/**']
+            control-panel: ['apps/control-panel/**', 'libs/schema/**']
+            viewer: ['apps/viewer/**', 'libs/schema/**']
+            plugins-api: ['apps/plugins-api/**', 'libs/schema/**']
+            external-api: ['apps/external-api/**', 'libs/schema/**']
+            mongo-backup: ['apps/mongo-backup/**', 'libs/schema/**']
+            account-archive: ['apps/account-archive/**', 'libs/schema/**']
+
+      - id: compute
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_SERVICE: ${{ inputs.service }}
+          CHANGES: ${{ steps.changed.outputs.changes }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$INPUT_SERVICE" == "all" ]]; then
+              services='["ui","gateway","control-panel","viewer","plugins-api","external-api","mongo-backup","account-archive"]'
+            else
+              services="[\"$INPUT_SERVICE\"]"
+            fi
+          else
+            # paths-filter emits a JSON array of matched filter names
+            services="${CHANGES:-[]}"
+          fi
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+          echo "Resolved services: $services"
+
+  # ---------------------------------------------------------------
+  # deploy — build, push, and roll out each changed service
+  # ---------------------------------------------------------------
+  deploy:
+    needs: detect
+    if: ${{ needs.detect.outputs.services != '[]' && needs.detect.outputs.services != '' }}
+    runs-on: ubuntu-latest
+    environment: prod
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.detect.outputs.services) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # -----------------------------------------------------------
+      # Resolve per-service config (build context, dockerfile path,
+      # image tag, replica counts, resource limits).
+      # -----------------------------------------------------------
+      - name: Resolve per-service config
+        id: cfg
+        env:
+          SERVICE: ${{ matrix.service }}
+          OWNER: ${{ github.repository_owner }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          owner_lc=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
+          image="${REGISTRY}/${owner_lc}/remote-falcon-${SERVICE}:${SHA}"
+
+          # Build context + dockerfile (schema-consuming services use monorepo
+          # root context so libs/schema/ is COPYable; the rest are self-contained).
+          case "$SERVICE" in
+            control-panel|external-api|viewer|plugins-api|account-archive)
+              context="."
+              dockerfile="apps/$SERVICE/Dockerfile"
+              ;;
+            ui|gateway|mongo-backup)
+              context="apps/$SERVICE"
+              dockerfile="Dockerfile"
+              ;;
+            *)
+              echo "Unknown service: $SERVICE" >&2
+              exit 1
+              ;;
+          esac
+
+          # Per-service replicas + resources. Values mirror what each repo's
+          # original build-and-release.yml shipped (also documented in SERVICES.md).
+          # Tokens not referenced by a given service's manifest are simply ignored
+          # by replace-tokens, so we set a superset here.
+          case "$SERVICE" in
+            ui)              replicas=1; replicas_min=1; replicas_max=1; req_mem=64Mi;   req_cpu=5m;   lim_mem=128Mi;  lim_cpu=100m  ;;
+            gateway)         replicas=2; replicas_min=2; replicas_max=2; req_mem=1000Mi; req_cpu=750m; lim_mem=1250Mi; lim_cpu=1000m ;;
+            control-panel)   replicas=1; replicas_min=1; replicas_max=1; req_mem=256Mi;  req_cpu=100m; lim_mem=512Mi;  lim_cpu=500m  ;;
+            viewer)          replicas=1; replicas_min=1; replicas_max=1; req_mem=160Mi;  req_cpu=50m;  lim_mem=320Mi;  lim_cpu=500m  ;;
+            plugins-api)     replicas=1; replicas_min=1; replicas_max=1; req_mem=192Mi;  req_cpu=150m; lim_mem=384Mi;  lim_cpu=750m  ;;
+            external-api)    replicas=1; replicas_min=1; replicas_max=1; req_mem=256Mi;  req_cpu=100m; lim_mem=512Mi;  lim_cpu=500m  ;;
+            mongo-backup)    replicas=1; replicas_min=1; replicas_max=1; req_mem=128Mi;  req_cpu=25m;  lim_mem=750Mi;  lim_cpu=200m  ;;
+            account-archive) replicas=1; replicas_min=1; replicas_max=1; req_mem=64Mi;   req_cpu=10m;  lim_mem=128Mi;  lim_cpu=100m  ;;
+          esac
+
+          {
+            echo "image=$image"
+            echo "context=$context"
+            echo "dockerfile=$dockerfile"
+            echo "manifest=apps/$SERVICE/k8s/manifest.yml"
+            echo "deployment=remote-falcon-$SERVICE"
+            echo "replicas=$replicas"
+            echo "replicas_min=$replicas_min"
+            echo "replicas_max=$replicas_max"
+            echo "req_mem=$req_mem"
+            echo "req_cpu=$req_cpu"
+            echo "lim_mem=$lim_mem"
+            echo "lim_cpu=$lim_cpu"
+          } >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------
+      # Build + push (per-pattern variants gated by service name)
+      # -----------------------------------------------------------
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute UI build version
+        id: date
+        if: matrix.service == 'ui'
+        run: echo "version=$(date -u +'%Y.%m.%d')" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push (ui)
+        if: matrix.service == 'ui'
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.cfg.outputs.context }}
+          file: ${{ steps.cfg.outputs.context }}/${{ steps.cfg.outputs.dockerfile }}
+          push: true
+          tags: ${{ steps.cfg.outputs.image }}
+          build-args: |
+            HOST_ENV=prod
+            VERSION=${{ steps.date.outputs.version }}
+            CONTROL_PANEL_API=https://remotefalcon.com/remote-falcon-control-panel
+            VIEWER_API=https://remotefalcon.com/remote-falcon-viewer
+            VIEWER_JWT_KEY=${{ secrets.VIEWER_JWT_KEY }}
+            GOOGLE_MAPS_KEY=${{ secrets.GOOGLE_MAPS_KEY }}
+            PUBLIC_POSTHOG_KEY=${{ secrets.PUBLIC_POSTHOG_KEY }}
+            GA_TRACKING_ID=${{ secrets.GA_TRACKING_ID }}
+            MIXPANEL_KEY=${{ secrets.MIXPANEL_KEY }}
+            CLARITY_PROJECT_ID=${{ secrets.CLARITY_PROJECT_ID }}
+            HOSTNAME_PARTS=2
+            SWAP_CP=false
+            VIEWER_PAGE_SUBDOMAIN=
+            SOCIAL_META=<meta property='og:type' content='website'/><meta property='og:url' content='https://remotefalcon.com/'/><meta property='og:title' content='Remote Falcon'/><meta property='og:description' content='Create a custom website where viewers can request or vote for sequences to watch on your light show.'/><meta property='og:image' content='https://remotefalcon.com/jukebox.png'/>
+
+      - name: Build and push (gateway)
+        if: matrix.service == 'gateway'
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.cfg.outputs.context }}
+          file: ${{ steps.cfg.outputs.context }}/${{ steps.cfg.outputs.dockerfile }}
+          push: true
+          tags: ${{ steps.cfg.outputs.image }}
+          build-args: |
+            OTEL_OPTS=
+
+      - name: Build and push (Quarkus services with Mongo + OTEL build-args)
+        if: contains(fromJSON('["viewer","plugins-api","mongo-backup","account-archive"]'), matrix.service)
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.cfg.outputs.context }}
+          file: ${{ steps.cfg.outputs.context }}/${{ steps.cfg.outputs.dockerfile }}
+          push: true
+          tags: ${{ steps.cfg.outputs.image }}
+          build-args: |
+            MONGO_URI=${{ secrets.MONGO_URI }}
+            OTEL_URI=${{ secrets.OTEL_URI }}
+
+      - name: Build and push (Spring native services without build-args)
+        if: contains(fromJSON('["control-panel","external-api"]'), matrix.service)
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.cfg.outputs.context }}
+          file: ${{ steps.cfg.outputs.context }}/${{ steps.cfg.outputs.dockerfile }}
+          push: true
+          tags: ${{ steps.cfg.outputs.image }}
+
+      # -----------------------------------------------------------
+      # Token-replace manifest, apply, monitor rollout
+      # -----------------------------------------------------------
+      - name: Replace tokens in manifest
+        uses: cschleiden/replace-tokens@v1
+        with:
+          files: ${{ steps.cfg.outputs.manifest }}
+        env:
+          Namespace: ${{ env.NAMESPACE }}
+          Application: remote-falcon-${{ matrix.service }}
+          Image: ${{ steps.cfg.outputs.image }}
+          Version: ${{ github.sha }}
+          Env: prod
+          Host: remotefalcon.com
+          SubdomainHost: '*.remotefalcon.com'
+          Replicas: ${{ steps.cfg.outputs.replicas }}
+          Replicas.Min: ${{ steps.cfg.outputs.replicas_min }}
+          Replicas.Max: ${{ steps.cfg.outputs.replicas_max }}
+          Requests.Memory: ${{ steps.cfg.outputs.req_mem }}
+          Requests.CPU: ${{ steps.cfg.outputs.req_cpu }}
+          Limits.Memory: ${{ steps.cfg.outputs.lim_mem }}
+          Limits.CPU: ${{ steps.cfg.outputs.lim_cpu }}
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Save kubeconfig
+        run: doctl kubernetes cluster kubeconfig save --expiry-seconds 600 ${{ env.CLUSTER_ID }}
+
+      - name: kubectl apply
+        run: kubectl apply -f ${{ steps.cfg.outputs.manifest }}
+
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/${{ steps.cfg.outputs.deployment }} --namespace ${{ env.NAMESPACE }} --timeout=5m

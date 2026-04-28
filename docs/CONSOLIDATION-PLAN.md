@@ -20,7 +20,7 @@
 | Phase | Status | Started | Completed | Notes |
 |---|---|---|---|---|
 | 0: Pre-work | ✅ Complete | 2026-04-27 | 2026-04-27 | Tags pushed to all 10 repos; baseline captured; `developer-files` migration risk surfaced |
-| A: Monorepo cutover | 🚧 In progress | 2026-04-27 | | A1 (subtree-merge) ✓; A2 (JitPack→local module) ✓; A3 (ops/ + platform/core split) ✓; A4 (cutover gate, core 4/4 + platform 8/8) ✓; A5–A7 pending |
+| A: Monorepo cutover | 🚧 In progress | 2026-04-27 | | A1 (subtree-merge) ✓; A2 (JitPack→local module) ✓; A3 (ops/ + platform/core split) ✓; A4 (cutover gate, core 4/4 + platform 8/8) ✓; A5 (unified deploy workflow) ✓; A6–A7 pending |
 | B: Unified CI | ☐ Not started | | | |
 | C: Test pyramid | ☐ Not started | | | |
 | D: Service merges | ☐ Not started | | | |
@@ -413,3 +413,4 @@ Pick based on what hurts most.
 | 2026-04-27 | Phase A2 executed: root Maven aggregator pom.xml added; all 5 consumers switched from JitPack `com.github.Remote-Falcon:...:a5703a28fe` → local `com.remotefalcon:remote-falcon-library:1.0.0-LOCAL`; Gradle composite deferred to Phase B | Matt + Claude session |
 | 2026-04-27 | Phase A3 executed: ops/ created with dev-up.sh, compose, nginx; introduced platform/core mode split via Compose profiles to support both SaaS-operator and self-host deployments (matching the existing deployment-wizard shape); --core flag added to dev-up.sh | Matt + Claude session |
 | 2026-04-27 | Phase A4 verified: cutover gate green in both modes (core 4/4, platform 8/8). Fixed Dockerfile.dev jar coords, dev-nginx lazy upstream resolution, .env.dev S3/web.url gaps, application-dev.yml for gateway+external-api, gateway health URL. Issue #4 tracks S3ClientConfig conditional-bean cleanup. | Matt + Claude session |
+| 2026-04-27 | Phase A5 executed: single .github/workflows/deploy.yml replaces 10 inert per-service workflows; matrix-based detect+deploy pattern with paths-filter; libs/schema/** triggers all 5 consumers; secrets matrix documented. | Matt + Claude session |
