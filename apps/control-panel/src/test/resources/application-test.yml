@@ -1,0 +1,86 @@
+# Test profile for the control-panel service.
+#
+# This file is loaded when @ActiveProfiles("test") is active. It supplies the
+# minimal set of properties required for an @SpringBootTest context to start
+# without a real Mongo, S3, MailerSend, GitHub, or OpenAI dependency.
+#
+# JWT key MUST stay in sync with libs/test-fixtures' TestSecrets.JWT_KEY so
+# tokens minted by JwtFactory validate against AuthUtil's signer. The
+# TestSecretsDriftTest in libs/test-fixtures is intended to assert this.
+
+# Strip the production context path so MockMvc requests hit "/controlPanel/..."
+# directly without needing the "/remote-falcon-control-panel" prefix.
+server:
+  servlet:
+    context-path: ""
+
+spring:
+  # Disable scheduled tasks during tests so retention crons don't fire mid-test.
+  task:
+    scheduling:
+      enabled: false
+  # JPA bootstrap is skipped — app excludes DataSourceAutoConfiguration in
+  # @SpringBootApplication, but HibernateJpaAutoConfiguration is also auto-loaded
+  # via spring-boot-starter-data-jpa being on the classpath, so exclude it too.
+  #
+  # Mongo auto-config IS loaded — testcontainers-based tests
+  # (JwtAuthIntegrationTest, RetentionSweepIntegrationTest, ShowRepositoryCollationTest)
+  # all bring up a real Mongo and inject the URI via @DynamicPropertySource. Excluding
+  # MongoAutoConfiguration here would break them: @EnableMongoRepositories needs a
+  # real mongoTemplate bean to wire ShowRepository, and @MockBean substitution doesn't
+  # work cleanly because it runs after the repository factory's bean creation.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+  data:
+    mongodb:
+      database: ${MONGO_DATABASE:remote-falcon-test}
+
+# JWT signing keys.
+# - jwt.user: control-panel HMAC key. Default MUST match
+#   libs/test-fixtures' TestSecrets.JWT_KEY (drift-detected by TestSecretsDriftTest).
+# - jwt.viewer: separate key consumed by viewer-side endpoints; placeholder is fine
+#   for tests that don't exercise the viewer surface.
+jwt:
+  user: ${JWT_USER:test-jwt-must-be-256-bits-long-padding-padding-padding-padding}
+  viewer: test-viewer-jwt-key
+
+# S3ClientConfig throws on a blank endpoint; supply a harmless placeholder.
+s3:
+  endpoint: http://s3.test.local
+  accessKey: test-access-key
+  secretKey: test-secret-key
+
+images:
+  s3:
+    bucket: test-bucket
+  cdn:
+    endpoint: http://cdn.test.local
+
+# Misc placeholders required by various @Value-injected configs/services so the
+# context bootstraps cleanly. Real values are not exercised in this test.
+github:
+  pat: test-github-pat
+wattson:
+  key: test-wattson-key
+  max_output_tokens: 0
+openai:
+  model: ""
+auto-validate-email: false
+expo-push-url: http://expo.test.local
+web:
+  url: http://test.local
+sendgrid:
+  key: test-sendgrid-key
+  template:
+    sign-up: test
+    forgot-password: test
+    request-api-access: test
+client:
+  header: X-Forwarded-For
+
+mailersend:
+  template-ids:
+    sign-up: test
+    forgot-password: test
+    request-api-access: test
