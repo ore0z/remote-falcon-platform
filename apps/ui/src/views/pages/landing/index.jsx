@@ -1,45 +1,22 @@
-import { styled } from '@mui/material/styles';
+import { Box } from '@mui/material';
 
 import AppBar from '../../../ui-component/extended/AppBar';
 
 import Feature from './Feature';
 import Footer from './Footer';
 import Header from './Header';
-import KeyFeature from './KeyFeature';
 
-const HeaderWrapper = styled('div')(({ theme }) => ({
-  paddingTop: 30,
-  overflowX: 'hidden',
-  overflowY: 'clip',
-  [theme.breakpoints.down('md')]: {
-    paddingTop: 42
-  }
-}));
-
-const SecondWrapper = styled('div')(({ theme }) => ({
-  paddingTop: 160,
-  [theme.breakpoints.down('md')]: {
-    paddingTop: 60
-  }
-}));
-
-const Landing = () => {
-  return (
-    <>
-      <HeaderWrapper id="home">
-        <AppBar />
-        <Header />
-      </HeaderWrapper>
-      <SecondWrapper>
-        <Feature />
-      </SecondWrapper>
-      <SecondWrapper>
-        <KeyFeature />
-      </SecondWrapper>
-      <SecondWrapper />
-      <Footer />
-    </>
-  );
-};
+// NB: do NOT wrap this tree in a node with overflow-x: hidden (or any
+// overflow != visible). The AppBar inside uses position: sticky and an
+// overflow-clipped ancestor turns itself into the sticky scroll context,
+// killing the stick. Header self-clips its decorative orb already.
+const Landing = () => (
+  <Box id="home">
+    <AppBar />
+    <Header />
+    <Feature />
+    <Footer />
+  </Box>
+);
 
 export default Landing;

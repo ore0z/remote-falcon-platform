@@ -1,5 +1,6 @@
 import React, { lazy } from 'react';
 
+import V2Theme from '../design-system/theme';
 import MinimalLayout from '../layout/MinimalLayout';
 import NavMotion from '../layout/NavMotion';
 import Loadable from '../ui-component/Loadable';
@@ -14,16 +15,21 @@ const VerifyEmail = Loadable(lazy(() => import('../views/pages/authentication/Ve
 const ResetPassword = Loadable(lazy(() => import('../views/pages/authentication/ResetPassword')));
 const PrivacyPolicy = Loadable(lazy(() => import('../views/pages/misc/PrivacyPolicy')));
 const TermsAndConditions = Loadable(lazy(() => import('../views/pages/misc/TermsAndConditions')));
-const Ownership = Loadable(lazy(() => import('../views/pages/misc/Ownership')));
 
+// Public routes wrap in the v2 design-system theme — landing, auth, legal,
+// 404. Once the user signs in and lands on /control-panel/*, MainRoutes
+// renders under App.jsx's outer LegacyTheme (Berry) until Phases 3–9 of
+// MIGRATION.md migrate the control panel to v2.
 const LoginRoutes = {
   path: '/',
   element: (
-    <NavMotion>
-      <GuestGuard>
-        <MinimalLayout />
-      </GuestGuard>
-    </NavMotion>
+    <V2Theme>
+      <NavMotion>
+        <GuestGuard>
+          <MinimalLayout />
+        </GuestGuard>
+      </NavMotion>
+    </V2Theme>
   ),
   children: [
     {
@@ -61,10 +67,6 @@ const LoginRoutes = {
     {
       path: '/terms-and-conditions',
       element: <TermsAndConditions />
-    },,
-    {
-      path: '/owners',
-      element: <Ownership />
     }
   ]
 };
