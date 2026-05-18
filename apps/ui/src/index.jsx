@@ -48,13 +48,14 @@ if (missingEnv.length > 0) {
   throw new Error(message);
 }
 
-// api_host is a SAME-ORIGIN relative path that nginx (dev + prod ingress)
-// reverse-proxies to PostHog. This dodges the ~25-30% of real users running
-// ad-blockers / DNS filters that block requests by URL pattern to known
-// analytics hosts. ui_host stays absolute so "View in PostHog" links from
-// the SDK (debug overlay etc.) still point at the real app.
+// Direct PostHog hosts. The previous same-origin /ingest reverse proxy
+// (commit 14404bf) was removed because the cluster admin disabled the
+// nginx.ingress configuration-snippet annotation used to implement it.
+// Tradeoff: the ~25-30% of users on ad blockers / DNS filters that block
+// us.i.posthog.com will silently drop events. A snippet-free proxy is
+// tracked in issue #130 for follow-up.
 const posthogOptions = {
-  api_host: '/ingest',
+  api_host: 'https://us.i.posthog.com',
   ui_host: 'https://us.posthog.com',
   person_profiles: 'identified_only',
   // Opt-in exception autocapture: emits $exception events for unhandled
