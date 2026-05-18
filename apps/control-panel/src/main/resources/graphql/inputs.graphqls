@@ -70,6 +70,8 @@ input PreferenceInput {
     selfHostedRedirectUrl: String
     blockedViewerIps: [String]
     notificationPreferences: NotificationPreferenceInput
+    analyticsBetaOptIn: Boolean
+    wrappedPublic: Boolean
 }
 
 input NotificationPreferenceInput {

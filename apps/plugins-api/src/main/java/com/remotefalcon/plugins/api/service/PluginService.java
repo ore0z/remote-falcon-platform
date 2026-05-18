@@ -692,15 +692,45 @@ public class PluginService {
     return null;
   }
 
+  // V18 — when the reported plugin/FPP version differs from what's stored,
+  // append a VersionChange record so the dashboard can show "last upgraded
+  // N days ago" + a history popover. Prune + push run as two updates because
+  // Mongo rejects $pull and $push on the same field path in one operation.
+  private static final long VERSION_CHANGE_RETENTION_DAYS = 365L;
+
   public PluginResponse pluginVersion(PluginVersion request) {
     Show show = showContext.getShow();
+    String newPluginVer = request.getPluginVersion();
+    String newFppVer = request.getFppVersion();
+    boolean pluginChanged = newPluginVer != null && !java.util.Objects.equals(newPluginVer, show.getPluginVersion());
+    boolean fppChanged = newFppVer != null && !java.util.Objects.equals(newFppVer, show.getFppVersion());
+
     Show.mongoCollection().updateOne(
         Filters.eq("showToken", show.getShowToken()),
         Updates.combine(
-            Updates.set("pluginVersion", request.getPluginVersion()),
-            Updates.set("fppVersion", request.getFppVersion())
+            Updates.set("pluginVersion", newPluginVer),
+            Updates.set("fppVersion", newFppVer)
         )
     );
+
+    if (pluginChanged || fppChanged) {
+      LocalDateTime now = LocalDateTime.now();
+      LocalDateTime cutoff = now.minusDays(VERSION_CHANGE_RETENTION_DAYS);
+      Show.mongoCollection().updateOne(
+          Filters.eq("showToken", show.getShowToken()),
+          Updates.pull("versionChanges", Filters.lt("at", cutoff))
+      );
+      Show.mongoCollection().updateOne(
+          Filters.eq("showToken", show.getShowToken()),
+          Updates.push("versionChanges",
+              VersionChange.builder()
+                  .at(now)
+                  .pluginVersion(newPluginVer)
+                  .fppVersion(newFppVer)
+                  .build())
+      );
+    }
+
     return PluginResponse.builder().message("Success").build();
   }
 
@@ -782,8 +812,55 @@ public class PluginService {
     return PluginResponse.builder().managedPsaEnabled(enabled).build();
   }
 
+  // Threshold for what counts as "the plugin dropped." Plugin heartbeats
+  // every ~30s in steady state; 5 min is comfortably outside normal jitter
+  // but tight enough to catch real outages worth visualizing.
+  private static final long HEARTBEAT_GAP_THRESHOLD_MINUTES = 5L;
+  private static final long HEARTBEAT_GAP_RETENTION_DAYS = 30L;
+  // Floor for accepting a heartbeat write. The plugin sends every ~30s, so
+  // anything faster than this is either a buggy plugin (retry loop, clock
+  // jitter on a slow box) or a misbehaving client. Heartbeat data is
+  // information-poor — we only care about "alive in the last 5 min" — so
+  // silently dropping high-frequency duplicates is loss-free and protects
+  // the Show document from write amplification at scale.
+  private static final long HEARTBEAT_MIN_INTERVAL_SECONDS = 10L;
+
   public void fppHeartbeat() {
     Show show = showContext.getShow();
-    Show.mongoCollection().updateOne(Filters.eq("showToken", show.getShowToken()), Updates.set("lastFppHeartbeat", LocalDateTime.now()));
+    LocalDateTime now = LocalDateTime.now();
+    LocalDateTime previous = show.getLastFppHeartbeat();
+
+    // Rate limit: if the previous heartbeat landed within the floor, accept
+    // the request (controller returns 204) but skip the Mongo write. Caller
+    // can't tell the difference and doesn't need to — fire-and-forget.
+    if (previous != null && previous.isAfter(now.minusSeconds(HEARTBEAT_MIN_INTERVAL_SECONDS))) {
+      return;
+    }
+
+    // V17 — gap detection. If the previous heartbeat was more than the
+    // threshold ago, we just came back from an outage; record the gap window.
+    HeartbeatGap newGap = null;
+    if (previous != null && previous.isBefore(now.minusMinutes(HEARTBEAT_GAP_THRESHOLD_MINUTES))) {
+      newGap = HeartbeatGap.builder().startedAt(previous).endedAt(now).build();
+    }
+
+    // Always prune anything older than the retention window — keeps the
+    // embedded list bounded over a long-running show that's been up for years.
+    // Pull + push on heartbeatGaps must be two separate updates because Mongo
+    // rejects both modifiers on the same field path in one operation.
+    LocalDateTime cutoff = now.minusDays(HEARTBEAT_GAP_RETENTION_DAYS);
+    var filter = Filters.eq("showToken", show.getShowToken());
+
+    Show.mongoCollection().updateOne(
+        filter,
+        Updates.combine(
+            Updates.set("lastFppHeartbeat", now),
+            Updates.pull("heartbeatGaps", Filters.lt("endedAt", cutoff))
+        )
+    );
+
+    if (newGap != null) {
+      Show.mongoCollection().updateOne(filter, Updates.push("heartbeatGaps", newGap));
+    }
   }
 }

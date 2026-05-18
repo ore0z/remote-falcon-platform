@@ -16,8 +16,8 @@ import axios from '../utils/axios';
 import { StatusResponse } from '../utils/enum';
 import { SIGN_UP, VERIFY_EMAIL, FORGOT_PASSWORD, RESET_PASSWORD } from '../utils/graphql/controlPanel/mutations';
 import { SIGN_IN, GET_SHOW } from '../utils/graphql/controlPanel/queries';
-import { showAlert, showAlertOld } from '../views/pages/globalPageHelpers';
 import { trackPosthogEvent } from '../utils/analytics/posthog';
+import { showAlert } from '../views/pages/globalPageHelpers';
 
 const verifyToken = (serviceToken) => {
   if (!serviceToken) {
@@ -112,11 +112,13 @@ export const JWTProvider = ({ children }) => {
                   ...showData
                 })
               );
-              // Identify this user/show in PostHog using the showSubdomain as distinct_id
+              // Identify this user/show in PostHog using the showSubdomain
+              // as distinct_id. Intentionally NOT sending email — PII to a
+              // third-party analytics provider, regulated (GDPR/CCPA), and
+              // not needed for analytics (showSubdomain is the user key).
               try {
                 if (posthog && showData?.showSubdomain) {
                   posthog.identify(showData.showSubdomain, {
-                    email: showData?.email,
                     showName: showData?.showName,
                     showRole: showData?.showRole
                   });
@@ -131,6 +133,10 @@ export const JWTProvider = ({ children }) => {
           logout();
         }
       } catch (err) {
+        // Token verify / show fetch failed during boot — users land back
+        // on login with no other signal. Surface to ops so silent bounces
+        // are debuggable.
+        trackPosthogEvent('session_init_failed', { message: err?.message });
         logout();
       }
     };
@@ -155,26 +161,29 @@ export const JWTProvider = ({ children }) => {
             ...showData
           })
         );
-        // Identify this user/show in PostHog using the showSubdomain as distinct_id
+        // See identify() note above — no email to PostHog.
         try {
           if (posthog && showData?.showSubdomain) {
             posthog.identify(showData.showSubdomain, {
-              email: showData?.email,
               showName: showData?.showName,
               showRole: showData?.showRole
             });
           }
         } catch (_) {}
+        trackPosthogEvent('signin', {
+          show_name: showData?.showName,
+          show_role: showData?.showRole
+        });
       },
       onError: (error) => {
         if (error?.message === StatusResponse.UNAUTHORIZED) {
-          showAlertOld({ dispatch, message: 'Invalid Credentials', alert: 'warning' });
+          showAlert(dispatch, { message: 'Invalid Credentials', alert: 'warning' });
         } else if (error?.message === StatusResponse.SHOW_NOT_FOUND) {
-          showAlertOld({ dispatch, message: 'Show could not be found!', alert: 'error' });
+          showAlert(dispatch, { message: 'Show could not be found!', alert: 'error' });
         } else if (error?.message === StatusResponse.EMAIL_NOT_VERIFIED) {
-          showAlertOld({ dispatch, message: 'Email has not been verified', alert: 'warning' });
+          showAlert(dispatch, { message: 'Email has not been verified', alert: 'warning' });
         } else {
-          showAlertOld({ dispatch, alert: 'error' });
+          showAlert(dispatch, { alert: 'error' });
         }
       }
     });
@@ -225,13 +234,14 @@ export const JWTProvider = ({ children }) => {
         showToken
       },
       onCompleted: () => {
-        showAlertOld({ dispatch, message: 'Email successfully verified' });
+        trackPosthogEvent('email_verified');
+        showAlert(dispatch, { message: 'Email successfully verified' });
         setTimeout(() => {
           navigate('/signin', { replace: true });
         }, 3000);
       },
       onError: () => {
-        showAlertOld({ dispatch, alert: 'error' });
+        showAlert(dispatch, { alert: 'error' });
       }
     });
   };
@@ -247,18 +257,18 @@ export const JWTProvider = ({ children }) => {
         email
       },
       onCompleted: () => {
-        showAlertOld({ dispatch, message: `Forgot password email sent to ${email}` });
+        showAlert(dispatch, { message: `Forgot password email sent to ${email}` });
         setTimeout(() => {
           navigate('/signin', { replace: true });
         }, 3000);
       },
       onError: (error) => {
         if (error?.message === StatusResponse.UNAUTHORIZED) {
-          showAlertOld({ dispatch, alert: 'error' });
+          showAlert(dispatch, { alert: 'error' });
         } else if (error?.message === StatusResponse.EMAIL_CANNOT_BE_SENT) {
-          showAlertOld({ dispatch, message: 'Unable to send password reset email', alert: 'error' });
+          showAlert(dispatch, { message: 'Unable to send password reset email', alert: 'error' });
         } else {
-          showAlertOld({ dispatch, alert: 'error' });
+          showAlert(dispatch, { alert: 'error' });
         }
       }
     });
@@ -274,13 +284,13 @@ export const JWTProvider = ({ children }) => {
         }
       },
       onCompleted: () => {
-        showAlertOld({ dispatch, message: 'Password Reset' });
+        showAlert(dispatch, { message: 'Password Reset' });
         setTimeout(() => {
           navigate('/signin', { replace: true });
         }, 3000);
       },
       onError: () => {
-        showAlertOld({ dispatch, alert: 'error' });
+        showAlert(dispatch, { alert: 'error' });
       }
     });
   };

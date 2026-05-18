@@ -59,6 +59,7 @@ export const SIGN_IN = gql`
           fppHeartbeatRenotifyAfterMinutes
           fppHeartbeatLastNotification
         }
+        analyticsBetaOptIn
       }
       sequences {
         name
@@ -180,6 +181,7 @@ export const GET_SHOW = gql`
           fppHeartbeatRenotifyAfterMinutes
           fppHeartbeatLastNotification
         }
+        analyticsBetaOptIn
       }
       sequences {
         name
@@ -234,6 +236,37 @@ export const GET_SHOW = gql`
   }
 `;
 
+// V15 — request → play conversion funnel for the Sequences analytics tab.
+export const REQUEST_CONVERSION = gql`
+  query ($startDate: Long!, $endDate: Long!, $timezone: String) @api(name: controlPanel) {
+    requestConversion(startDate: $startDate, endDate: $endDate, timezone: $timezone) {
+      attempted
+      accepted
+      rejected
+      conversionRate
+      rejectionsByReason {
+        reason
+        count
+      }
+    }
+  }
+`;
+
+// V16 — PSA effectiveness panel for the Sequences analytics tab.
+export const PSA_EFFECTIVENESS = gql`
+  query ($timezone: String) @api(name: controlPanel) {
+    psaEffectiveness(timezone: $timezone) {
+      psaPlays {
+        name
+        lastPlayedMs
+        viewersAround
+        requestsBefore
+        requestsAfter
+      }
+    }
+  }
+`;
+
 export const DASHBOARD_LIVE_STATS = gql`
   query ($startDate: Long!, $endDate: Long!, $timezone: String) @api(name: controlPanel) {
     dashboardLiveStats(startDate: $startDate, endDate: $endDate, timezone: $timezone) {
@@ -243,6 +276,18 @@ export const DASHBOARD_LIVE_STATS = gql`
       totalRequests
       currentVotes
       totalVotes
+      currentViewers
+      medianDwellSecondsTonight
+      lastHeartbeatMs
+      heartbeatGaps {
+        startedAtMs
+        endedAtMs
+      }
+      versionChanges {
+        atMs
+        pluginVersion
+        fppVersion
+      }
     }
   }
 `;
@@ -295,6 +340,65 @@ export const DASHBOARD_STATS = gql`
           name
           total
         }
+      }
+    }
+  }
+`;
+
+export const WRAPPED_SUMMARY = gql`
+  query ($token: String!, $season: String!, $year: Int!, $timezone: String) @api(name: controlPanel) {
+    wrappedSummary(token: $token, season: $season, year: $year, timezone: $timezone) {
+      showName
+      season
+      year
+      startDate
+      endDate
+      seasonComplete
+      activeNights
+      uniqueViewers
+      totalPageHits
+      medianDwellSeconds
+      longestDwellSeconds
+      mostLoyalRegularNights
+      regularsCount
+      topRequestedSequence
+      topRequestedCount
+      topRequestedTotalPlaySeconds
+      topVotedSequence
+      topVotedCount
+      peakNightDate
+      peakNightViewers
+      peakHour
+      peakDayOfWeek
+      peakDayOfWeekAvg
+    }
+  }
+`;
+
+export const VIEWER_SESSIONS = gql`
+  query ($startDate: Long!, $endDate: Long!, $timezone: String) @api(name: controlPanel) {
+    viewerSessions(startDate: $startDate, endDate: $endDate, timezone: $timezone) {
+      sessions {
+        viewerId
+        ipHash
+        nightDate
+        firstSeen
+        lastSeen
+        eventCount
+        durationSeconds
+      }
+    }
+  }
+`;
+
+export const DASHBOARD_STATS_BY_HOUR = gql`
+  query ($startDate: Long!, $endDate: Long!, $timezone: String) @api(name: controlPanel) {
+    dashboardStatsByHour(startDate: $startDate, endDate: $endDate, timezone: $timezone) {
+      buckets {
+        date
+        hour
+        total
+        unique
       }
     }
   }
@@ -411,51 +515,6 @@ export const GET_SHOW_BY_SHOW_NAME = gql`
         ipAddress
         visitDateTime
       }
-    }
-  }
-`;
-
-export const GET_NOTIFICATIONS = gql`
-  query @api(name: controlPanel) {
-    getNotifications {
-      notification {
-        id
-        uuid
-        createdDate
-        preview
-        subject
-        message
-      }
-      read
-      deleted
-    }
-  }
-`;
-
-export const ASK_WATTSON = gql`
-  query($prompt: String!, $previousResponseId: String) @api(name: controlPanel) {
-    askWattson(prompt: $prompt, previousResponseId: $previousResponseId) {
-        responseId
-        text
-    }
-}
-`;
-
-export const GET_WATTSON_FEEDBACK = gql `
-  query($filterBy: String) @api(name: controlPanel) {
-    getWattsonFeedback(filterBy: $filterBy) {
-      showSubdomain
-      responseId
-      feedback
-    }
-  }
-`;
-
-export const GET_WATTSON_RESPONSE = gql `
-  query($responseId: String!) @api(name: controlPanel) {
-    getWattsonResponse(responseId: $responseId) {
-      prompt
-      response
     }
   }
 `;

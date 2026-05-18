@@ -5,14 +5,20 @@ import { useTheme } from '@mui/material/styles';
 import PropTypes from 'prop-types';
 
 const headerSX = {
+  p: 2,
   '& .MuiCardHeader-action': { mr: 0 }
 };
 
+// v2 cards default to a 1px divider-toned border for consistent
+// card-to-card separation across the platform. Visual hierarchy still
+// comes from spacing — the border is just enough to keep adjacent
+// cards from blending together. Pass `border={false}` to opt out, or
+// `boxShadow` to add a hover lift on interactive cards.
 const MainCard = React.forwardRef(
   (
     {
       border = true,
-      boxShadow,
+      boxShadow = false,
       children,
       content = true,
       contentClass = '',
@@ -34,7 +40,7 @@ const MainCard = React.forwardRef(
         {...others}
         sx={{
           border: border ? '1px solid' : 'none',
-          borderColor: theme.palette.mode === 'dark' ? theme.palette.background.default : theme.palette.primary[200] + 75,
+          borderColor: 'divider',
           ':hover': {
             boxShadow: boxShadow
               ? shadow || (theme.palette.mode === 'dark' ? '0 2px 14px 0 rgb(33 150 243 / 10%)' : '0 2px 14px 0 rgb(32 40 45 / 8%)')
@@ -43,14 +49,11 @@ const MainCard = React.forwardRef(
           ...sx
         }}
       >
-        {/* card header and action */}
         {!darkTitle && title && <CardHeader sx={headerSX} title={title} action={secondary} />}
         {darkTitle && title && <CardHeader sx={headerSX} title={<Typography variant="h3">{title}</Typography>} action={secondary} />}
 
-        {/* content & header divider */}
         {title && <Divider />}
 
-        {/* card content */}
         {content && (
           <CardContent sx={contentSX} className={contentClass}>
             {children}

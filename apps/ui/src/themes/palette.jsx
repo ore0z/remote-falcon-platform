@@ -1,5 +1,5 @@
 // material-ui
-import { createTheme } from '@mui/material/styles';
+import { createTheme, darken } from '@mui/material/styles';
 
 // assets
 import theme1 from '../assets/scss/_theme1.module.scss';
@@ -79,9 +79,15 @@ const Palette = (navType, presetColor) => {
         dark: colors.yellowDark
       },
       warning: {
+        // Light mode darkens the warning palette so foreground text/icons
+        // pass AA contrast (3:1 for UI / icons) on white surfaces. The
+        // default theme's `warningDark` (#ffc107) is still ~1.6:1 against
+        // white — barely visible. A 25% darken (≈ #c19306) drops it to
+        // ~3.7:1, comfortably readable. Dark mode keeps the original pale
+        // yellow which reads cleanly on dark backgrounds.
         light: colors.warningLight,
-        main: colors.warningMain,
-        dark: colors.warningDark
+        main: navType === 'dark' ? colors.warningMain : darken(colors.warningDark, 0.25),
+        dark: navType === 'dark' ? colors.warningDark : darken(colors.warningDark, 0.4)
       },
       success: {
         light: colors.successLight,
@@ -110,7 +116,10 @@ const Palette = (navType, presetColor) => {
         dark: navType === 'dark' ? colors.darkTextPrimary : colors.grey900,
         hint: colors.grey100
       },
-      divider: navType === 'dark' ? colors.darkTextPrimary : colors.grey200,
+      // Low-alpha white in dark mode — `darkTextPrimary` (#bdc8f0) was a text
+      // color and read as too stark when used for borders/dividers. Light mode
+      // keeps the original grey200 line.
+      divider: navType === 'dark' ? 'rgba(255, 255, 255, 0.08)' : colors.grey200,
       background: {
         paper: navType === 'dark' ? colors.darkLevel2 : colors.paper,
         default: navType === 'dark' ? colors.darkPaper : colors.paper

@@ -3,14 +3,12 @@ package com.remotefalcon.controlpanel.service;
 import com.mailersend.sdk.MailerSendResponse;
 import com.remotefalcon.controlpanel.repository.NotificationRepository;
 import com.remotefalcon.controlpanel.repository.ShowRepository;
-import com.remotefalcon.controlpanel.repository.WattsonRepository;
 import com.remotefalcon.controlpanel.util.AuthUtil;
 import com.remotefalcon.controlpanel.util.ClientUtil;
 import com.remotefalcon.controlpanel.util.EmailUtil;
 import com.remotefalcon.controlpanel.util.RandomUtil;
 import com.remotefalcon.library.documents.Notification;
 import com.remotefalcon.library.documents.Show;
-import com.remotefalcon.library.documents.Wattson;
 import com.remotefalcon.library.enums.NotificationType;
 import com.remotefalcon.library.enums.ShowRole;
 import com.remotefalcon.library.enums.StatusResponse;
@@ -38,7 +36,6 @@ public class GraphQLMutationService {
     private final AuthUtil authUtil;
     private final ShowRepository showRepository;
     private final NotificationRepository notificationRepository;
-    private final WattsonRepository wattsonRepository;
     private final ClientUtil clientUtil;
 
     @Value("${auto-validate-email}")
@@ -318,11 +315,36 @@ public class GraphQLMutationService {
             if(preferences.getViewerControlEnabled() != show.get().getPreferences().getViewerControlEnabled()) {
                 preferences.setSequencesPlayed(0);
             }
+            // Capability-URL token for the public Wrapped page. Generated
+            // server-side on the wrappedPublic null/false -> true transition
+            // if no token exists yet. Preserved on subsequent updates so
+            // share links don't churn. To rotate, a future "Regenerate
+            // share link" action explicitly clears wrappedShareToken before
+            // re-saving with wrappedPublic=true. Clients can't set the
+            // token field themselves (we overwrite from the existing or
+            // newly-generated value).
+            Preference current = show.get().getPreferences();
+            String existingToken = current == null ? null : current.getWrappedShareToken();
+            boolean wantsPublic = Boolean.TRUE.equals(preferences.getWrappedPublic());
+            if (wantsPublic && (existingToken == null || existingToken.isEmpty())) {
+                preferences.setWrappedShareToken(generateWrappedShareToken());
+            } else {
+                preferences.setWrappedShareToken(existingToken);
+            }
             show.get().setPreferences(preferences);
             this.showRepository.save(show.get());
             return true;
         }
         throw new RuntimeException(StatusResponse.UNEXPECTED_ERROR.name());
+    }
+
+    // 32-char URL-safe random token from a CSPRNG. ~192 bits of entropy,
+    // not guessable in any feasible time. Kept separate from showToken
+    // (which is the operator-side bearer credential).
+    private static String generateWrappedShareToken() {
+        byte[] bytes = new byte[24];
+        new java.security.SecureRandom().nextBytes(bytes);
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     public Boolean updatePages(List<ViewerPage> pages) {
@@ -524,40 +546,6 @@ public class GraphQLMutationService {
         throw new RuntimeException(StatusResponse.UNEXPECTED_ERROR.name());
     }
 
-    public Boolean markNotificationsAsRead(List<String> uuids) {
-        Optional<Show> show = this.showRepository.findByShowToken(authUtil.getTokenDTO().getShowToken());
-        if(show.isPresent()) {
-            Show existingShow = show.get();
-            Optional.ofNullable(existingShow.getShowNotifications())
-                    .orElse(Collections.emptyList())
-                    .forEach(showNotification -> {
-                if(uuids.contains(showNotification.getNotification().getUuid())) {
-                    showNotification.setRead(true);
-                }
-            });
-            this.showRepository.save(existingShow);
-            return true;
-        }
-        throw new RuntimeException(StatusResponse.UNEXPECTED_ERROR.name());
-    }
-
-    public Boolean deleteNotificationForUser(String uuid) {
-        Optional<Show> show = this.showRepository.findByShowToken(authUtil.getTokenDTO().getShowToken());
-        if(show.isPresent()) {
-            Show existingShow = show.get();
-            Optional.ofNullable(existingShow.getShowNotifications())
-                    .orElse(Collections.emptyList())
-                    .forEach(showNotification -> {
-                if (Objects.equals(showNotification.getNotification().getUuid(), uuid)) {
-                    showNotification.setDeleted(true);
-                }
-            });
-            this.showRepository.save(existingShow);
-            return true;
-        }
-        throw new RuntimeException(StatusResponse.UNEXPECTED_ERROR.name());
-    }
-
     public Boolean createNotification(Notification notification) {
         notification.setUuid(UUID.randomUUID().toString());
         notification.setCreatedDate(LocalDateTime.now());
@@ -603,24 +591,5 @@ public class GraphQLMutationService {
         return true;
     }
 
-    public Boolean wattsonFeedback(String responseId, String feedback) {
-        Optional<Show> show = this.showRepository.findByShowToken(authUtil.getTokenDTO().getShowToken());
-        if(show.isEmpty()) {
-            return false;
-        }
-        
-        Wattson wattson = this.wattsonRepository.findByResponseId(responseId);
-        if(wattson != null) {
-            wattson.setFeedback(feedback);
-        }else {
-            wattson = Wattson.builder()
-                .showSubdomain(show.get().getShowSubdomain())
-                .responseId(responseId)
-                .feedback(feedback)
-                .build();
-        }
-        this.wattsonRepository.save(wattson);
-        return true;
-    }
 }
 

@@ -16,7 +16,7 @@ import java.util.List;
 @Data
 @Builder
 // @NoArgsConstructor + @AllArgsConstructor brought in line with every other
-// document and nested model in libs/schema (Notification, Wattson, Preference,
+// document and nested model in libs/schema (Notification, Preference,
 // Sequence, etc all carry both). Without an explicit no-args constructor here
 // Jackson cannot deserialize a Show from JSON -- Lombok's @Builder generates a
 // package-private all-args constructor which suppresses @Data's no-args
@@ -55,12 +55,24 @@ public class Show {
     private List<Request> requests;
     private List<Vote> votes;
     private List<ActiveViewer> activeViewers;
+    // PRD A1 — viewer session history. Maintained by the viewer service on
+    // every page-stat / active-viewer write via 5-min dwell-window upsert.
+    // Powers dwell-time, returning-visitor, and "regulars" analytics.
+    private List<ViewerSession> viewerSessions;
     private String playingNow;
     private String playingNext;
     private String playingNextFromSchedule;
     private Sequence playingNowSequence;
     private Sequence playingNextSequence;
     private LocalDateTime lastFppHeartbeat;
+    // PRD V17 — rolling 30-day log of windows where heartbeats were absent
+    // for >5 minutes. Maintained by plugins-api on each fppHeartbeat write
+    // (gap detection + prune-older-than-30-days in the same call).
+    private List<HeartbeatGap> heartbeatGaps;
+    // PRD V18 — rolling 365-day log of plugin/FPP version transitions.
+    // Maintained by plugins-api on every pluginVersion call when the
+    // reported version differs from the current stored value.
+    private List<VersionChange> versionChanges;
 
     private List<ShowNotification> showNotifications;
 

@@ -2,12 +2,9 @@ package com.remotefalcon.controlpanel.controller;
 
 import com.remotefalcon.controlpanel.aop.RequiresAccess;
 import com.remotefalcon.controlpanel.aop.RequiresAdminAccess;
-import com.remotefalcon.controlpanel.model.AskWattson;
-import com.remotefalcon.controlpanel.model.WattsonResponse;
 import com.remotefalcon.controlpanel.response.ShowsOnAMap;
 import com.remotefalcon.library.documents.Notification;
 import com.remotefalcon.library.documents.Show;
-import com.remotefalcon.library.documents.Wattson;
 import com.remotefalcon.library.models.*;
 import com.remotefalcon.controlpanel.response.dashboard.DashboardLiveStatsResponse;
 import com.remotefalcon.controlpanel.response.dashboard.DashboardStatsResponse;
@@ -168,18 +165,6 @@ public class GraphQLController {
     }
 
     @MutationMapping
-    @RequiresAccess
-    public Boolean markNotificationsAsRead(@Argument List<String> uuids) {
-        return this.graphQLMutationService.markNotificationsAsRead(uuids);
-    }
-
-    @MutationMapping
-    @RequiresAccess
-    public Boolean deleteNotificationForUser(@Argument String uuid) {
-        return this.graphQLMutationService.deleteNotificationForUser(uuid);
-    }
-
-    @MutationMapping
     @RequiresAdminAccess
     public Boolean createNotification(@Argument Notification notification) {
         return this.graphQLMutationService.createNotification(notification);
@@ -197,11 +182,6 @@ public class GraphQLController {
         return this.graphQLMutationService.deleteNotification(uuid);
     }
 
-    @MutationMapping
-    @RequiresAccess
-    public Boolean wattsonFeedback(@Argument String responseId, @Argument String feedback) {
-        return this.graphQLMutationService.wattsonFeedback(responseId, feedback);
-    }
 
 
     /*******
@@ -249,6 +229,44 @@ public class GraphQLController {
 
     @QueryMapping
     @RequiresAccess()
+    public com.remotefalcon.controlpanel.response.dashboard.DashboardHourlyStatsResponse dashboardStatsByHour(@Argument Long startDate, @Argument Long endDate, @Argument String timezone) {
+        return dashboardService.dashboardStatsByHour(startDate, endDate, timezone);
+    }
+
+    @QueryMapping
+    @RequiresAccess()
+    public com.remotefalcon.controlpanel.response.dashboard.ViewerSessionsResponse viewerSessions(@Argument Long startDate, @Argument Long endDate, @Argument String timezone) {
+        return dashboardService.viewerSessions(startDate, endDate, timezone);
+    }
+
+    // V15 — request → play conversion funnel for the Sequences analytics tab.
+    @QueryMapping
+    @RequiresAccess()
+    public com.remotefalcon.controlpanel.response.dashboard.RequestConversionResponse requestConversion(@Argument Long startDate, @Argument Long endDate, @Argument String timezone) {
+        return dashboardService.requestConversion(startDate, endDate, timezone);
+    }
+
+    // V16 — PSA effectiveness panel for the Sequences analytics tab.
+    @QueryMapping
+    @RequiresAccess()
+    public com.remotefalcon.controlpanel.response.dashboard.PsaEffectivenessResponse psaEffectiveness(@Argument String timezone) {
+        return dashboardService.psaEffectiveness(timezone);
+    }
+
+    // PUBLIC — no @RequiresAccess. Anyone with the show's wrappedShareToken
+    // (a CSPRNG-random capability URL) can pull the season summary. The
+    // token IS the credential; subdomain enumeration is not a route here.
+    @QueryMapping
+    public com.remotefalcon.controlpanel.response.dashboard.WrappedSummaryResponse wrappedSummary(
+            @Argument String token,
+            @Argument String season,
+            @Argument Integer year,
+            @Argument String timezone) {
+        return dashboardService.wrappedSummary(token, season, year, timezone);
+    }
+
+    @QueryMapping
+    @RequiresAccess()
     public List<ShowsOnAMap> showsOnAMap() {
         return graphQLQueryService.showsOnAMap();
     }
@@ -265,21 +283,4 @@ public class GraphQLController {
         return this.graphQLQueryService.getNotifications();
     }
 
-    @QueryMapping
-    @RequiresAccess
-    public AskWattson askWattson(@Argument String prompt, @Argument String previousResponseId) {
-        return this.graphQLQueryService.askWattson(prompt, previousResponseId);
-    }
-
-    @QueryMapping
-    @RequiresAdminAccess
-    public WattsonResponse getWattsonResponse(@Argument String responseId) {
-        return this.graphQLQueryService.getWattsonResponse(responseId);
-    }
-
-    @QueryMapping
-    @RequiresAdminAccess
-    public List<Wattson> getWattsonFeedback(@Argument String filterBy) {
-        return this.graphQLQueryService.getWattsonFeedback(filterBy);
-    }
 }
