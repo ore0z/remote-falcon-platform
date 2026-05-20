@@ -1,6 +1,7 @@
 import { Buffer } from 'buffer';
 
 import { StatusResponse } from '../../utils/enum';
+import { GET_SHOW } from '../../utils/graphql/controlPanel/queries';
 
 export const deleteAccountService = (deleteAccountMutation, callback) => {
   deleteAccountMutation({
@@ -63,26 +64,44 @@ export const requestApiAccessService = (requestApiAccessMutation, callback) => {
         Route: 'Control-Panel'
       }
     },
-    onCompleted: () => {
+    onCompleted: (data) => {
       callback({
         success: true,
+        apiAccess: data?.requestApiAccess,
         toast: { message: 'API Access Requested' }
       });
     },
-    onError: (error) => {
-      if (error?.message === StatusResponse.API_ACCESS_REQUESTED) {
-        callback({
-          success: false,
-          toast: { alert: 'warning', message: 'API Access Already Requested' }
-        });
-      } else {
-        callback({
-          success: false,
-          toast: { alert: 'error' }
-        });
+    onError: () => {
+      callback({
+        success: false,
+        toast: { alert: 'error' }
+      });
+    },
+    refetchQueries: [{ query: GET_SHOW, awaitRefetchQueries: true }]
+  });
+};
+
+export const refreshApiSecretService = (refreshApiSecretMutation, callback) => {
+  refreshApiSecretMutation({
+    context: {
+      headers: {
+        Route: 'Control-Panel'
       }
-    }
-    // refetchQueries: [{ query: GET_SHOW, awaitRefetchQueries: true }]
+    },
+    onCompleted: (data) => {
+      callback({
+        success: true,
+        secretKey: data?.refreshApiSecret,
+        toast: { message: 'API Secret Key Refreshed' }
+      });
+    },
+    onError: () => {
+      callback({
+        success: false,
+        toast: { alert: 'error', message: 'Failed to refresh API Secret Key' }
+      });
+    },
+    refetchQueries: [{ query: GET_SHOW, awaitRefetchQueries: true }]
   });
 };
 
