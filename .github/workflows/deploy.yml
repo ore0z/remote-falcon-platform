@@ -332,6 +332,10 @@ jobs:
           file: ${{ steps.cfg.outputs.context }}/${{ steps.cfg.outputs.dockerfile }}
           push: true
           tags: ${{ steps.cfg.outputs.image }}
+          # POSTHOG_CLI_API_KEY is the same Personal API Key already used by
+          # the daily digest CronJob + the post-deploy error-rate check.
+          # Scopes needed: error_tracking:write (plus the existing
+          # query:read, insight:*, dashboard:*).
           build-args: |
             HOST_ENV=prod
             VERSION=${{ steps.date.outputs.version }}
@@ -339,6 +343,7 @@ jobs:
             VIEWER_API=https://remotefalcon.com/remote-falcon-viewer
             GOOGLE_MAPS_KEY=${{ secrets.GOOGLE_MAPS_KEY }}
             PUBLIC_POSTHOG_KEY=${{ secrets.PUBLIC_POSTHOG_KEY }}
+            POSTHOG_CLI_API_KEY=${{ secrets.POSTHOG_API_KEY }}
             HOSTNAME_PARTS=2
             SWAP_CP=false
             VIEWER_PAGE_SUBDOMAIN=
@@ -355,7 +360,7 @@ jobs:
           build-args: |
             OTEL_OPTS=
 
-      - name: Build and push (Quarkus services with Mongo + OTEL build-args)
+      - name: Build and push (Quarkus services with Mongo build-arg)
         if: contains(fromJSON('["viewer","plugins-api","mongo-backup","account-archive"]'), matrix.service)
         uses: docker/build-push-action@v6
         with:
@@ -363,9 +368,13 @@ jobs:
           file: ${{ steps.cfg.outputs.context }}/${{ steps.cfg.outputs.dockerfile }}
           push: true
           tags: ${{ steps.cfg.outputs.image }}
+          # OTEL_URI used to be baked in here from a build-time secret.
+          # That secret holds a stale value (a now-dead IP) and the
+          # runtime override via k8s env (PR #36) plus the application.properties
+          # default ($OTEL_URI:http://otel-collector:4317) cover every
+          # deploy mode. Build-arg dropped; org secret can be deleted.
           build-args: |
             MONGO_URI=${{ secrets.MONGO_URI }}
-            OTEL_URI=${{ secrets.OTEL_URI }}
 
       - name: Build and push (Spring native services without build-args)
         if: contains(fromJSON('["control-panel","external-api"]'), matrix.service)
