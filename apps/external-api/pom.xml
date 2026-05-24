@@ -63,6 +63,19 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+            <exclusions>
+                <!--
+                    jsonassert ships com.vaadin.external.google:android-json which
+                    contains org.json.JSONObject and clashes with org.json:json
+                    declared as a compile dep above. Spring logs "Found multiple
+                    occurrences of org.json.JSONObject on the class path" without
+                    this exclusion. We don't use JSONAssert in tests.
+                -->
+                <exclusion>
+                    <groupId>com.vaadin.external.google</groupId>
+                    <artifactId>android-json</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
@@ -96,6 +109,19 @@
             <groupId>net.sf.dozer</groupId>
             <artifactId>dozer</artifactId>
             <version>5.5.1</version>
+            <exclusions>
+                <!--
+                    Dozer pulls in slf4j's jcl-over-slf4j, which advertises the
+                    org.apache.commons.logging package and triggers spring-jcl's
+                    "Standard Commons Logging discovery in action" warning.
+                    spring-jcl is the canonical Commons Logging provider in
+                    Spring 6, so this bridge is redundant.
+                -->
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>jcl-over-slf4j</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>com.auth0</groupId>
@@ -153,10 +179,41 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mongodb</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
+            <scope>test</scope>
+            <exclusions>
+                <!--
+                    rest-assured pulls in apache httpclient 4.5.x which
+                    transitively brings commons-logging. Spring uses spring-jcl
+                    as a drop-in replacement and warns when both are on the
+                    classpath. Exclude commons-logging here so spring-jcl is the
+                    sole Commons Logging provider at runtime.
+                -->
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.remotefalcon</groupId>
+            <artifactId>remote-falcon-test-fixtures</artifactId>
+            <version>1.0.0-LOCAL</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -207,6 +264,72 @@
                 <groupId>org.graalvm.buildtools</groupId>
                 <artifactId>native-maven-plugin</artifactId>
                 <version>0.10.2</version>
+            </plugin>
+            <!--
+                JaCoCo coverage. Mirrors apps/control-panel/pom.xml's plugin block:
+                prepare-agent on the test JVM, report bound to the test phase,
+                and a BUNDLE-level check bound to verify that gates `mvn verify`
+                on LINE + BRANCH coverage minimums. Floor values are set just
+                below the achieved coverage so unrelated changes don't regress
+                without anyone noticing.
+            -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <!--
+                    Pin to the version that today resolves via Spring Boot's BOM.
+                    Maven warns when a plugin version is missing and future
+                    Maven versions may refuse to build malformed projects.
+                -->
+                <version>0.8.14</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <!--
+                                    Achieved at the time of writing: ~81% LINE, ~96% BRANCH.
+                                    Floor is set comfortably below achieved (LINE 0.75,
+                                    BRANCH 0.85) so that unrelated changes don't accidentally
+                                    regress coverage, but small refactors that shift a few
+                                    lines around still pass without forcing a floor bump.
+                                -->
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.75</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.85</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
