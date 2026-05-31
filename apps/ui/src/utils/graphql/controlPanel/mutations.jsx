@@ -58,9 +58,29 @@ export const DELETE_ACCOUNT = gql`
   }
 `;
 
+// Returns the persisted page list with server-minted pageIds + updatedAt
+// (selected explicitly here so the UI can re-dispatch authoritative state
+// instead of falling back to the pre-save local snapshot, which is missing
+// pageId on freshly-created pages).
 export const UPDATE_PAGES = gql`
   mutation ($pages: [PageInput]!) @api(name: controlPanel) {
-    updatePages(pages: $pages)
+    updatePages(pages: $pages) {
+      name
+      active
+      html
+      pageId
+      updatedAt
+    }
+  }
+`;
+
+// RF Page Builder integration (PRD External Viewer Page API). Mints a
+// short-lived launch URL embedding an HS256 JWT in the query param;
+// the UI does window.location.assign(url) to hand the user off to
+// RFPB's /launch route. Returns the full URL string.
+export const LAUNCH_EXTERNAL_EDITOR = gql`
+  mutation ($pageId: String!) @api(name: controlPanel) {
+    launchExternalEditor(pageId: $pageId)
   }
 `;
 

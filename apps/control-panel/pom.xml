@@ -112,6 +112,19 @@
             <artifactId>java-jwt</artifactId>
             <version>3.18.3</version>
         </dependency>
+
+        <!--
+            libs/auth — shared launch JWT signer/verifier for the RF Page
+            Builder integration (PR-B of PRD External Viewer Page API).
+            Control-panel uses LaunchTokenSigner here in the
+            launchExternalEditor GraphQL mutation; external-api uses
+            LaunchTokenVerifier on the matching session-exchange endpoint.
+        -->
+        <dependency>
+            <groupId>com.remotefalcon</groupId>
+            <artifactId>remote-falcon-auth</artifactId>
+            <version>1.0.0-LOCAL</version>
+        </dependency>
         <dependency>
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
@@ -206,6 +219,26 @@
             <artifactId>remote-falcon-test-fixtures</artifactId>
             <version>1.0.0-LOCAL</version>
             <scope>test</scope>
+        </dependency>
+
+        <!--
+            jsoup — HTML parser used by the viewer-page denylist sanitizer.
+            Added 2026-05-24 for RF Page Builder integration (PRD External
+            Viewer Page API). Used by ViewerPageService.sanitize to strip
+            execution vectors (script tags except inert types, on*
+            attributes, javascript:/vbscript: URLs, non-media data: URLs,
+            CSS exec patterns, foreignObject in svg) before persisting any
+            html field. See ViewerPageService for the full denylist.
+
+            Native-image note: jsoup's HTML parser uses reflection to
+            instantiate HtmlTreeBuilder. RuntimeHints contributor is wired
+            at config/RfpbRuntimeHints.java; keep that in sync if the parse
+            chain changes.
+        -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.18.3</version>
         </dependency>
     </dependencies>
 
