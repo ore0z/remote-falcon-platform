@@ -18,7 +18,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.bson.Document;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -40,6 +45,7 @@ public class GraphQLMutationService {
     private final NotificationRepository notificationRepository;
     private final ClientUtil clientUtil;
     private final ViewerPageService viewerPageService;
+    private final MongoTemplate mongoTemplate;
 
     @Value("${auto-validate-email}")
     Boolean autoValidateEmail;
@@ -429,6 +435,181 @@ public class GraphQLMutationService {
             return true;
         }
         throw new RuntimeException(StatusResponse.UNEXPECTED_ERROR.name());
+    }
+
+    // PSA-v2 PR-5 (Q1) — soft-enable/disable a PSA by name without
+    // touching its position in the list or the lastPlayed timestamp.
+    // Throws UNEXPECTED_ERROR if the show is missing; throws
+    // INVALID_PSA_NAME if the named PSA isn't present in
+    // psaSequences[] (UI is expected to keep the list in sync, so
+    // mismatch here means stale state worth surfacing as an error
+    // rather than silently no-op'ing).
+    public Boolean updatePsaEnabled(String name, Boolean enabled) {
+        Optional<Show> show = this.showRepository.findByShowToken(authUtil.getTokenDTO().getShowToken());
+        if(show.isEmpty()) {
+            throw new RuntimeException(StatusResponse.UNEXPECTED_ERROR.name());
+        }
+        List<PsaSequence> list = show.get().getPsaSequences();
+        if(list == null) {
+            throw new RuntimeException(StatusResponse.INVALID_PSA_NAME.name());
+        }
+        PsaSequence match = list.stream()
+                .filter(p -> p != null && StringUtils.equals(p.getName(), name))
+                .findFirst()
+                .orElse(null);
+        if(match == null) {
+            throw new RuntimeException(StatusResponse.INVALID_PSA_NAME.name());
+        }
+        match.setEnabled(enabled);
+        this.showRepository.save(show.get());
+        return true;
+    }
+
+    // PSA-v2 PR-5 (Q7) — operator pick of the next PSA. Single-shot
+    // override: PR-2 will read + clear it at the next sequence
+    // boundary. Pass null/empty to clear a pending override. A
+    // non-null/non-empty name MUST match a PSA in
+    // Show.psaSequences[]; otherwise reject so the operator sees a
+    // clear error rather than silently saving a name that will never
+    // fire.
+    // Marker on Request.viewerRequested for entries injected via Q7
+    // operator override. Lets setNextPsaOverride(null) find and undo the
+    // injection (cancel pending). Mirrors PR-3's "LEADER" marker pattern.
+    private static final String OVERRIDE_REQUEST_MARKER = "OVERRIDE";
+
+    public Boolean setNextPsaOverride(String name) {
+        String showToken = authUtil.getTokenDTO().getShowToken();
+        Show s = this.showRepository.findByShowToken(showToken)
+                .orElseThrow(() -> new RuntimeException(StatusResponse.UNEXPECTED_ERROR.name()));
+        Query query = Query.query(Criteria.where("showToken").is(showToken));
+
+        // PSA-v2 review item 3: write with targeted atomic $pull/$push/$set
+        // instead of showRepository.save() (a full-document replace). During a
+        // live show, viewers ($push request/vote) and the FPP plugin
+        // (updateWhatsPlaying) write this same document concurrently, so a
+        // read-modify-save here silently clobbered their writes (lost updates).
+
+        // Cancel pending: drop OVERRIDE-marked requests AND the override vote
+        // (item 8 — voting-mode overrides leave a vote, not a request) and
+        // clear the safety-net field. The X on Special Roles / the dashboard
+        // pseudo-row both call this with null.
+        if(StringUtils.isBlank(name)) {
+            this.mongoTemplate.updateFirst(query, new Update()
+                    .pull("requests", new Document("viewerRequested", OVERRIDE_REQUEST_MARKER))
+                    .pull("votes", new Document("ownerOverride", true))
+                    .set("nextPsaOverride", null), Show.class);
+            return true;
+        }
+
+        // Validate the PSA exists in the configured list.
+        List<PsaSequence> psas = s.getPsaSequences();
+        Optional<PsaSequence> psaMatch = (psas == null) ? Optional.empty() : psas.stream()
+                .filter(p -> p != null && StringUtils.equals(p.getName(), name))
+                .findFirst();
+        if(psaMatch.isEmpty()) {
+            throw new RuntimeException(StatusResponse.INVALID_PSA_NAME.name());
+        }
+
+        // PSA-v2 Q7 (revised 2026-06-01): inject the PSA into the queue at
+        // mutation time, not on the next FPP updateWhatsPlaying. The original
+        // "set field, consume on next sequence change" design introduced a
+        // full-song delay — FPP polls nextPlaylistInQueue ~3 seconds before
+        // sequence end, and by that point the override hadn't been consumed
+        // yet. With immediate injection, the very next FPP poll picks it up.
+        //
+        // The plugin-side handlePsaOverride still exists as a safety net for
+        // any pathway that writes Show.nextPsaOverride directly.
+        Optional<Sequence> sequenceMatch = (s.getSequences() == null) ? Optional.empty() : s.getSequences().stream()
+                .filter(seq -> seq != null && StringUtils.equalsIgnoreCase(seq.getName(), name))
+                .findFirst();
+        if(sequenceMatch.isEmpty()) {
+            // PSA name is in the list but the FPP-synced sequence isn't —
+            // fall back to the field-set / handlePsaOverride safety-net so a
+            // warning surfaces on the next FPP tick.
+            this.mongoTemplate.updateFirst(query, new Update().set("nextPsaOverride", name), Show.class);
+            return true;
+        }
+        Sequence seq = sequenceMatch.get();
+
+        // Step 1 (atomic): single-shot dedup — pull any prior override request
+        // + vote so click-click-click doesn't pile up — stamp the PSA's
+        // lastPlayed, and clear the safety-net field. $pull and $push can't
+        // touch the same array path in one update, so the push is Step 2.
+        this.mongoTemplate.updateFirst(query, new Update()
+                .pull("requests", new Document("viewerRequested", OVERRIDE_REQUEST_MARKER))
+                .pull("votes", new Document("ownerOverride", true))
+                .set("psaSequences.$[psa].lastPlayed", LocalDateTime.now())
+                .filterArray(Criteria.where("psa.name").is(name))
+                .set("nextPsaOverride", null), Show.class);
+
+        // Step 2 (atomic): inject the override. The vote is marked
+        // ownerOverride=true so the cancel / dedup paths above can find and
+        // remove it — votes carry no position, and in voting mode there's no
+        // request to mark, so without this an override vote could never be
+        // cancelled and repeated clicks piled up (review item 8).
+        Update inject = new Update().push("votes", Vote.builder()
+                .sequence(seq)
+                .ownerVoted(false)
+                .ownerOverride(true)
+                .systemInjected(true)
+                .lastVoteTime(LocalDateTime.now())
+                .votes(2000)
+                .build());
+
+        ViewerControlMode mode = s.getPreferences() != null ? s.getPreferences().getViewerControlMode() : null;
+        if(mode != ViewerControlMode.VOTING) {
+            // JUKEBOX (default): priority position so this plays first.
+            // Position = min(existing non-override positions) - 1, or 1 if the
+            // queue is empty (computed from the read snapshot).
+            int position = 1;
+            if(s.getRequests() != null) {
+                Optional<Integer> minPosition = s.getRequests().stream()
+                        .filter(r -> r != null
+                                && !StringUtils.equals(r.getViewerRequested(), OVERRIDE_REQUEST_MARKER))
+                        .map(Request::getPosition)
+                        .filter(Objects::nonNull)
+                        .min(Integer::compareTo);
+                if(minPosition.isPresent()) {
+                    position = minPosition.get() - 1;
+                }
+            }
+            inject.push("requests", Request.builder()
+                    .sequence(seq)
+                    .ownerRequested(false)
+                    .viewerRequested(OVERRIDE_REQUEST_MARKER)
+                    .position(position)
+                    .build());
+        }
+        this.mongoTemplate.updateFirst(query, inject, Show.class);
+        return true;
+    }
+
+    // PSA-v2 PR-5 (Q6) — leader sequence played right before each
+    // viewer-requested song. Null/empty clears the field. We don't
+    // validate that the name matches an FPP sequence today — the
+    // existing updatePsaSequences mutation also accepts arbitrary
+    // names, and PR-2's "skip-on-missing" predicate handles drift at
+    // selection time. Keep the validation surface consistent.
+    public Boolean setRequestLeaderSequence(String name) {
+        Optional<Show> show = this.showRepository.findByShowToken(authUtil.getTokenDTO().getShowToken());
+        if(show.isEmpty()) {
+            throw new RuntimeException(StatusResponse.UNEXPECTED_ERROR.name());
+        }
+        show.get().setRequestLeaderSequence(StringUtils.isBlank(name) ? null : name);
+        this.showRepository.save(show.get());
+        return true;
+    }
+
+    // PSA-v2 PR-5 (Q6) — leader sequence played right before each
+    // voting winner. Same shape as setRequestLeaderSequence.
+    public Boolean setVoteLeaderSequence(String name) {
+        Optional<Show> show = this.showRepository.findByShowToken(authUtil.getTokenDTO().getShowToken());
+        if(show.isEmpty()) {
+            throw new RuntimeException(StatusResponse.UNEXPECTED_ERROR.name());
+        }
+        show.get().setVoteLeaderSequence(StringUtils.isBlank(name) ? null : name);
+        this.showRepository.save(show.get());
+        return true;
     }
 
     public Boolean updateSequences(List<Sequence> sequences) {

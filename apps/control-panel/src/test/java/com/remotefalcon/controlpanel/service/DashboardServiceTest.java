@@ -499,6 +499,126 @@ class DashboardServiceTest {
         assertThat(r.getPlayingNext()).isEqualTo("Sched Display");
     }
 
+    // ---- PSA-v2 PR-4: queue-depth + NEXT_PLAYLIST predicate rollout ----
+
+    @Test
+    void dashboardLiveStats_currentRequests_excludesPsaSequences() {
+        // PSA-v2 Q3: the operator's "current requests" tile must match the
+        // viewer-facing jukeboxDepth cap, which now excludes PSAs/leaders.
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .requests(new ArrayList<>(List.of(
+                        Request.builder().position(1).sequence(Sequence.builder().name("PSA1").build()).build(),
+                        Request.builder().position(2).sequence(Sequence.builder().name("Song1").build()).build(),
+                        Request.builder().position(3).sequence(Sequence.builder().name("Song2").build()).build())))
+                .votes(new ArrayList<>())
+                .sequences(new ArrayList<>())
+                .psaSequences(new ArrayList<>(List.of(
+                        PsaSequence.builder().name("PSA1").build())))
+                .playingNow("")
+                .playingNext("")
+                .playingNextFromSchedule("")
+                .stats(Stat.builder().jukebox(new ArrayList<>()).voting(new ArrayList<>()).build())
+                .build();
+        stubAuth(SHOW_TOKEN);
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        DashboardLiveStatsResponse r = service.dashboardLiveStats(0L, 0L, TZ);
+        // PSA1 is excluded; 2 viewer requests counted.
+        assertThat(r.getCurrentRequests()).isEqualTo(2);
+    }
+
+    @Test
+    void dashboardLiveStats_currentRequests_excludesLeaderSequences() {
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .requests(new ArrayList<>(List.of(
+                        Request.builder().position(1).sequence(Sequence.builder().name("ReqLeader").build()).build(),
+                        Request.builder().position(2).sequence(Sequence.builder().name("Song1").build()).build())))
+                .votes(new ArrayList<>())
+                .sequences(new ArrayList<>())
+                .psaSequences(new ArrayList<>())
+                .requestLeaderSequence("ReqLeader")
+                .playingNow("")
+                .playingNext("")
+                .playingNextFromSchedule("")
+                .stats(Stat.builder().jukebox(new ArrayList<>()).voting(new ArrayList<>()).build())
+                .build();
+        stubAuth(SHOW_TOKEN);
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        DashboardLiveStatsResponse r = service.dashboardLiveStats(0L, 0L, TZ);
+        assertThat(r.getCurrentRequests()).isEqualTo(1);
+    }
+
+    @Test
+    void dashboardLiveStats_playingNext_returnsPsaAtFront_ofRequestQueue() {
+        // Operator dashboard must surface the *actual* next item, including
+        // PSAs. The viewer's NEXT_PLAYLIST filters PSAs (viewer service); the
+        // operator's tile does not. The PSA chip on NowPlayingCard tags it
+        // visually.
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .requests(new ArrayList<>(List.of(
+                        Request.builder().position(1).sequence(Sequence.builder().name("PSA1").displayName("PSA1 Display").build()).build(),
+                        Request.builder().position(2).sequence(Sequence.builder().name("Song1").displayName("Song One").build()).build())))
+                .votes(new ArrayList<>())
+                .sequences(new ArrayList<>(List.of(
+                        Sequence.builder().name("Song1").displayName("Song One").build())))
+                .psaSequences(new ArrayList<>(List.of(PsaSequence.builder().name("PSA1").build())))
+                .playingNow("")
+                .playingNext("")
+                .playingNextFromSchedule("")
+                .stats(Stat.builder().jukebox(new ArrayList<>()).voting(new ArrayList<>()).build())
+                .build();
+        stubAuth(SHOW_TOKEN);
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        DashboardLiveStatsResponse r = service.dashboardLiveStats(0L, 0L, TZ);
+        assertThat(r.getPlayingNext()).isEqualTo("PSA1 Display");
+    }
+
+    @Test
+    void dashboardLiveStats_playingNext_returnsScheduledPsa_whenScheduleIsPsa() {
+        // When FPP itself reports a PSA in playingNextFromSchedule, the
+        // operator dashboard surfaces the PSA name. Operator needs to know
+        // what's actually coming so they can react to it.
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .requests(new ArrayList<>())
+                .votes(new ArrayList<>())
+                .sequences(new ArrayList<>(List.of(
+                        Sequence.builder().name("PSA1").displayName("PSA1 Display").build())))
+                .psaSequences(new ArrayList<>(List.of(PsaSequence.builder().name("PSA1").build())))
+                .playingNow("")
+                .playingNext("")
+                .playingNextFromSchedule("PSA1")
+                .stats(Stat.builder().jukebox(new ArrayList<>()).voting(new ArrayList<>()).build())
+                .build();
+        stubAuth(SHOW_TOKEN);
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        DashboardLiveStatsResponse r = service.dashboardLiveStats(0L, 0L, TZ);
+        assertThat(r.getPlayingNext()).isEqualTo("PSA1 Display");
+    }
+
+    @Test
+    void dashboardLiveStats_playingNext_returnsScheduledLeader_whenScheduleIsLeader() {
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .requests(new ArrayList<>())
+                .votes(new ArrayList<>())
+                .sequences(new ArrayList<>(List.of(
+                        Sequence.builder().name("VoteLeader").displayName("Vote Leader").build())))
+                .psaSequences(new ArrayList<>())
+                .voteLeaderSequence("VoteLeader")
+                .playingNow("")
+                .playingNext("")
+                .playingNextFromSchedule("VoteLeader")
+                .stats(Stat.builder().jukebox(new ArrayList<>()).voting(new ArrayList<>()).build())
+                .build();
+        stubAuth(SHOW_TOKEN);
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        DashboardLiveStatsResponse r = service.dashboardLiveStats(0L, 0L, TZ);
+        assertThat(r.getPlayingNext()).isEqualTo("Vote Leader");
+    }
+
     // ---- downloadStatsToExcel ----
 
     @Test

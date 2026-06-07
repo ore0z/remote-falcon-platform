@@ -1,4 +1,4 @@
-import { Grid, Skeleton, Stack, Typography } from '@mui/material';
+import { Box, Skeleton, Stack, Typography } from '@mui/material';
 import {
   IconBolt,
   IconHeadphones,
@@ -6,6 +6,7 @@ import {
   IconUsers
 } from '@tabler/icons-react';
 
+import HealthRow from './HealthRow';
 import LiveIndicator from '../../../../ui-component/LiveIndicator';
 import StatTile from '../../../../ui-component/StatTile';
 import { useSelector } from '../../../../store';
@@ -27,21 +28,33 @@ const LiveStatsRow = () => {
   const dwellTonight = stats?.medianDwellSecondsTonight;
   const dwellMin = dwellTonight && dwellTonight > 0 ? Math.max(1, Math.round(dwellTonight / 60)) : null;
 
+  // CSS grid with `gap` instead of MUI <Grid container spacing>: MUI's grid
+  // applies a negative left margin that the column's overflow was clipping,
+  // leaving the items' compensating left padding as a net ~16px indent. A gap
+  // grid has no negative margins, so the tiles sit flush with the page edge.
+  // Tiles in a row are equal height via the grid's default row stretch +
+  // StatTile's height:100%.
+  // 4 stat tiles + the compact FPP plugin card share one row so the "Right now"
+  // band reads as a single unit. 5-across on lg; wraps below.
+  const tileGridSx = {
+    display: 'grid',
+    gap: 2,
+    gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)', lg: 'repeat(5, 1fr)' }
+  };
+
   if (loading) {
     return (
-      <Grid container spacing={2}>
-        {[0, 1, 2, 3].map((i) => (
-          <Grid item xs={12} sm={6} md={3} key={i}>
-            <Skeleton variant="rectangular" height={120} sx={{ borderRadius: 1 }} />
-          </Grid>
+      <Box sx={tileGridSx}>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <Skeleton key={i} variant="rectangular" height={120} sx={{ borderRadius: 1 }} />
         ))}
-      </Grid>
+      </Box>
     );
   }
 
   return (
-    <Grid container spacing={2} role="status" aria-live="polite" aria-atomic="false">
-      <Grid item xs={12} sm={6} md={3} data-testid="dashboard-viewers-now">
+    <Box sx={tileGridSx} role="status" aria-live="polite" aria-atomic="false">
+      <Box data-testid="dashboard-viewers-now" sx={{ height: '100%' }}>
         <StatTile
           label="Viewers right now"
           value={viewersNow}
@@ -59,32 +72,29 @@ const LiveStatsRow = () => {
           }
           icon={<IconUsers size={28} stroke={1.5} />}
         />
-      </Grid>
-      <Grid item xs={12} sm={6} md={3} data-testid="dashboard-active-tile">
+      </Box>
+      <Box data-testid="dashboard-active-tile" sx={{ height: '100%' }}>
         <StatTile
           label={isJukebox ? 'Songs queued' : 'Active votes'}
           value={queuedNow}
           sub={isJukebox ? 'In the jukebox now' : 'Across active sequences'}
           icon={<IconHeadphones size={28} stroke={1.5} />}
         />
-      </Grid>
-      <Grid item xs={12} sm={6} md={3}>
-        <StatTile
-          label={isJukebox ? 'Requests today' : 'Votes cast today'}
-          value={interactionsToday}
-          sub={`Since midnight (${show?.timezone || 'show timezone'})`}
-          icon={<IconBolt size={28} stroke={1.5} />}
-        />
-      </Grid>
-      <Grid item xs={12} sm={6} md={3}>
-        <StatTile
-          label="Active sequences"
-          value={activeSequences}
-          sub={`${(show?.sequences || []).length} total`}
-          icon={<IconPlaylist size={28} stroke={1.5} />}
-        />
-      </Grid>
-    </Grid>
+      </Box>
+      <StatTile
+        label={isJukebox ? 'Requests today' : 'Votes cast today'}
+        value={interactionsToday}
+        sub={`Since midnight (${show?.timezone || 'show timezone'})`}
+        icon={<IconBolt size={28} stroke={1.5} />}
+      />
+      <StatTile
+        label="Active sequences"
+        value={activeSequences}
+        sub={`${(show?.sequences || []).length} total`}
+        icon={<IconPlaylist size={28} stroke={1.5} />}
+      />
+      <HealthRow />
+    </Box>
   );
 };
 

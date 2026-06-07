@@ -23,12 +23,16 @@ import com.remotefalcon.library.models.UserProfile;
 import com.remotefalcon.library.models.ViewerPage;
 import com.remotefalcon.library.models.Vote;
 import jakarta.servlet.http.HttpServletRequest;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -70,8 +74,19 @@ class GraphQLMutationServiceTest {
     @Mock private NotificationRepository notificationRepository;
     @Mock private ClientUtil clientUtil;
     @Mock private ViewerPageService viewerPageService;
+    @Mock private MongoTemplate mongoTemplate;
 
     @InjectMocks private GraphQLMutationService service;
+
+    // setNextPsaOverride now writes via atomic MongoTemplate updates rather
+    // than showRepository.save() (PSA-v2 review item 3), so its tests inspect
+    // the captured Update document instead of an in-memory Show. Helper:
+    // returns the sub-document for a given update operator ($set/$pull/$push),
+    // or an empty Document if the operator isn't present.
+    private static Document op(Update update, String operator) {
+        Object sub = update.getUpdateObject().get(operator);
+        return sub == null ? new Document() : (Document) sub;
+    }
 
     private void stubAuth() {
         when(authUtil.getTokenDTO()).thenReturn(TokenDTO.builder().showToken(SHOW_TOKEN).build());
@@ -440,6 +455,288 @@ class GraphQLMutationServiceTest {
         List<PsaSequence> psas = List.of(PsaSequence.builder().name("psa-1").build());
         assertThat(service.updatePsaSequences(psas)).isTrue();
         assertThat(show.getPsaSequences()).isEqualTo(psas);
+    }
+
+    // ---- PSA-v2 PR-5 mutations: updatePsaEnabled / setNextPsaOverride /
+    //                            setRequestLeaderSequence / setVoteLeaderSequence
+
+    @Test
+    void updatePsaEnabled_flipsEnabledFlag_byName() {
+        stubAuth();
+        PsaSequence p1 = PsaSequence.builder().name("psa-1").enabled(true).build();
+        PsaSequence p2 = PsaSequence.builder().name("psa-2").enabled(true).build();
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .psaSequences(new ArrayList<>(List.of(p1, p2)))
+                .build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        assertThat(service.updatePsaEnabled("psa-2", false)).isTrue();
+        // Only the matching row flips; the others are untouched.
+        assertThat(p1.getEnabled()).isTrue();
+        assertThat(p2.getEnabled()).isFalse();
+        verify(showRepository).save(show);
+    }
+
+    @Test
+    void updatePsaEnabled_rejects_whenNameNotInList() {
+        stubAuth();
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .psaSequences(new ArrayList<>(List.of(
+                        PsaSequence.builder().name("psa-1").enabled(true).build())))
+                .build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        assertThatThrownBy(() -> service.updatePsaEnabled("not-a-real-psa", false))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(StatusResponse.INVALID_PSA_NAME.name());
+        // Nothing saved on rejection — the operator should fix the input
+        // and try again.
+        verify(showRepository, never()).save(any(Show.class));
+    }
+
+    @Test
+    void updatePsaEnabled_rejects_whenPsaListNull() {
+        stubAuth();
+        // Pre-PR-1 documents may not have a psaSequences list at all.
+        Show show = Show.builder().showToken(SHOW_TOKEN).build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        assertThatThrownBy(() -> service.updatePsaEnabled("anything", true))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(StatusResponse.INVALID_PSA_NAME.name());
+    }
+
+    @Test
+    void setNextPsaOverride_injectsPsa_intoJukeboxQueueImmediately_atFrontOfQueue() {
+        // PSA-v2 Q7 (revised): the mutation injects the PSA at mutation time.
+        // Review item 3: it now writes via atomic MongoTemplate updates — a
+        // dedup/stamp step then an inject step — instead of a full-document
+        // save(), so we assert on the captured Update operations.
+        stubAuth();
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .preferences(Preference.builder().viewerControlMode(ViewerControlMode.JUKEBOX).build())
+                .psaSequences(new ArrayList<>(List.of(
+                        PsaSequence.builder().name("Donation").enabled(true).build())))
+                .sequences(new ArrayList<>(List.of(
+                        Sequence.builder().name("Donation").index(7).build())))
+                .requests(new ArrayList<>(List.of(
+                        Request.builder().position(2).sequence(Sequence.builder().name("Existing").build()).build())))
+                .votes(new ArrayList<>())
+                .build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        assertThat(service.setNextPsaOverride("Donation")).isTrue();
+
+        ArgumentCaptor<Update> updates = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), updates.capture(), eq(Show.class));
+        Update dedup = updates.getAllValues().get(0);
+        Update inject = updates.getAllValues().get(1);
+
+        // Step 1 dedups any prior OVERRIDE request + override vote, stamps
+        // lastPlayed, and clears the safety-net field.
+        assertThat(op(dedup, "$pull")).containsKey("requests");
+        assertThat(op(dedup, "$pull")).containsKey("votes");
+        assertThat(op(dedup, "$set")).containsKey("psaSequences.$[psa].lastPlayed");
+        assertThat(op(dedup, "$set")).containsKey("nextPsaOverride");
+
+        // Step 2 pushes the override request (OVERRIDE marker, min-1 = 1) and
+        // its parity vote (marked so it can be cancelled).
+        Request pushedRequest = (Request) op(inject, "$push").get("requests");
+        assertThat(pushedRequest.getViewerRequested()).isEqualTo("OVERRIDE");
+        assertThat(pushedRequest.getPosition()).isEqualTo(1);
+        Vote pushedVote = (Vote) op(inject, "$push").get("votes");
+        assertThat(pushedVote.getVotes()).isEqualTo(2000);
+        assertThat(pushedVote.getOwnerOverride()).isTrue();
+
+        // No full-document save — the whole point of item 3.
+        verify(showRepository, never()).save(any(Show.class));
+    }
+
+    @Test
+    void setNextPsaOverride_fallsBackToFieldSet_whenSequenceMissingFromFppList() {
+        // PSA exists in psaSequences but the FPP-synced sequence isn't present
+        // (likely a stale config). Falls back to the safety-net field-set so
+        // handlePsaOverride can warn-and-clear on next tick — one atomic $set,
+        // no injection.
+        stubAuth();
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .preferences(Preference.builder().viewerControlMode(ViewerControlMode.JUKEBOX).build())
+                .psaSequences(new ArrayList<>(List.of(
+                        PsaSequence.builder().name("Donation").enabled(true).build())))
+                .sequences(new ArrayList<>())
+                .requests(new ArrayList<>())
+                .votes(new ArrayList<>())
+                .build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        assertThat(service.setNextPsaOverride("Donation")).isTrue();
+
+        ArgumentCaptor<Update> update = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate, times(1)).updateFirst(any(Query.class), update.capture(), eq(Show.class));
+        assertThat(op(update.getValue(), "$set").get("nextPsaOverride")).isEqualTo("Donation");
+        verify(showRepository, never()).save(any(Show.class));
+    }
+
+    @Test
+    void setNextPsaOverride_addsMarkedVote_inVotingMode_andNoRequest() {
+        // Voting mode: the override is a vote, not a request. Review item 8 —
+        // it must be marked ownerOverride so cancel/dedup can pull it.
+        stubAuth();
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .preferences(Preference.builder().viewerControlMode(ViewerControlMode.VOTING).build())
+                .psaSequences(new ArrayList<>(List.of(
+                        PsaSequence.builder().name("Donation").enabled(true).build())))
+                .sequences(new ArrayList<>(List.of(
+                        Sequence.builder().name("Donation").index(7).build())))
+                .requests(new ArrayList<>())
+                .votes(new ArrayList<>())
+                .build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        assertThat(service.setNextPsaOverride("Donation")).isTrue();
+
+        ArgumentCaptor<Update> updates = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), updates.capture(), eq(Show.class));
+        Update inject = updates.getAllValues().get(1);
+        Vote pushedVote = (Vote) op(inject, "$push").get("votes");
+        assertThat(pushedVote.getVotes()).isEqualTo(2000);
+        assertThat(pushedVote.getSequence().getName()).isEqualTo("Donation");
+        assertThat(pushedVote.getOwnerOverride()).isTrue();
+        // No request push in voting mode.
+        assertThat(op(inject, "$push").containsKey("requests")).isFalse();
+        verify(showRepository, never()).save(any(Show.class));
+    }
+
+    @Test
+    void setNextPsaOverride_replacesPriorOverride_onSecondCall_latestClickWins() {
+        // Click PSA A → click PSA B. Single-shot: each call's dedup step pulls
+        // any prior override (request + vote) before injecting the new one, so
+        // the latest click wins atomically rather than piling up.
+        stubAuth();
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .preferences(Preference.builder().viewerControlMode(ViewerControlMode.JUKEBOX).build())
+                .psaSequences(new ArrayList<>(List.of(
+                        PsaSequence.builder().name("PSA_A").enabled(true).build(),
+                        PsaSequence.builder().name("PSA_B").enabled(true).build())))
+                .sequences(new ArrayList<>(List.of(
+                        Sequence.builder().name("PSA_A").index(7).build(),
+                        Sequence.builder().name("PSA_B").index(8).build())))
+                .requests(new ArrayList<>())
+                .votes(new ArrayList<>())
+                .build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        service.setNextPsaOverride("PSA_A");
+        service.setNextPsaOverride("PSA_B");
+
+        // Two calls × (dedup + inject) = 4 atomic updates.
+        ArgumentCaptor<Update> updates = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate, times(4)).updateFirst(any(Query.class), updates.capture(), eq(Show.class));
+        Request firstInject = (Request) op(updates.getAllValues().get(1), "$push").get("requests");
+        Request secondInject = (Request) op(updates.getAllValues().get(3), "$push").get("requests");
+        assertThat(firstInject.getSequence().getName()).isEqualTo("PSA_A");
+        // The second call's dedup step pulls the prior OVERRIDE before injecting.
+        assertThat(op(updates.getAllValues().get(2), "$pull")).containsKey("requests");
+        assertThat(secondInject.getSequence().getName()).isEqualTo("PSA_B");
+    }
+
+    @Test
+    void setNextPsaOverride_rejects_whenNameDoesNotMatchAnyPsa() {
+        stubAuth();
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .psaSequences(new ArrayList<>(List.of(
+                        PsaSequence.builder().name("Donation").enabled(true).build())))
+                .build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        assertThatThrownBy(() -> service.setNextPsaOverride("Not a PSA"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(StatusResponse.INVALID_PSA_NAME.name());
+        // Nothing written on rejection.
+        verify(mongoTemplate, never()).updateFirst(any(Query.class), any(Update.class), eq(Show.class));
+        verify(showRepository, never()).save(any(Show.class));
+    }
+
+    @Test
+    void setNextPsaOverride_cancel_pullsOverrideRequestAndVote_andClearsField_whenNameIsNull() {
+        // Cancel (item 8): pull the OVERRIDE-marked request AND the
+        // ownerOverride vote (voting-mode overrides leave only a vote), and
+        // clear the safety-net field — all in one atomic update.
+        stubAuth();
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .nextPsaOverride("PreviouslySet")
+                .build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        assertThat(service.setNextPsaOverride(null)).isTrue();
+
+        ArgumentCaptor<Update> update = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate, times(1)).updateFirst(any(Query.class), update.capture(), eq(Show.class));
+        Document pull = op(update.getValue(), "$pull");
+        assertThat(((Document) pull.get("requests")).get("viewerRequested")).isEqualTo("OVERRIDE");
+        assertThat(((Document) pull.get("votes")).get("ownerOverride")).isEqualTo(true);
+        assertThat(op(update.getValue(), "$set")).containsKey("nextPsaOverride");
+        verify(showRepository, never()).save(any(Show.class));
+    }
+
+    @Test
+    void setNextPsaOverride_cancel_whenNameIsBlank() {
+        stubAuth();
+        Show show = Show.builder().showToken(SHOW_TOKEN)
+                .nextPsaOverride("PreviouslySet")
+                .build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        assertThat(service.setNextPsaOverride("")).isTrue();
+        // Blank is treated like null — one cancel update, no save.
+        verify(mongoTemplate, times(1)).updateFirst(any(Query.class), any(Update.class), eq(Show.class));
+        verify(showRepository, never()).save(any(Show.class));
+    }
+
+    @Test
+    void setRequestLeaderSequence_setsField_andClearsOnNull() {
+        stubAuth();
+        Show show = Show.builder().showToken(SHOW_TOKEN).build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        assertThat(service.setRequestLeaderSequence("Bumper Intro")).isTrue();
+        assertThat(show.getRequestLeaderSequence()).isEqualTo("Bumper Intro");
+
+        // Pass null to clear — service treats null/blank uniformly.
+        assertThat(service.setRequestLeaderSequence(null)).isTrue();
+        assertThat(show.getRequestLeaderSequence()).isNull();
+    }
+
+    @Test
+    void setVoteLeaderSequence_setsField_andClearsOnBlank() {
+        stubAuth();
+        Show show = Show.builder().showToken(SHOW_TOKEN).build();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.of(show));
+
+        assertThat(service.setVoteLeaderSequence("Vote Winner Bumper")).isTrue();
+        assertThat(show.getVoteLeaderSequence()).isEqualTo("Vote Winner Bumper");
+
+        assertThat(service.setVoteLeaderSequence("   ")).isTrue();
+        assertThat(show.getVoteLeaderSequence()).isNull();
+    }
+
+    @Test
+    void newMutations_throwUnexpected_whenShowMissing() {
+        stubAuth();
+        when(showRepository.findByShowToken(SHOW_TOKEN)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.updatePsaEnabled("x", true))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(StatusResponse.UNEXPECTED_ERROR.name());
+        assertThatThrownBy(() -> service.setNextPsaOverride("x"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(StatusResponse.UNEXPECTED_ERROR.name());
+        assertThatThrownBy(() -> service.setRequestLeaderSequence("x"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(StatusResponse.UNEXPECTED_ERROR.name());
+        assertThatThrownBy(() -> service.setVoteLeaderSequence("x"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(StatusResponse.UNEXPECTED_ERROR.name());
     }
 
     @Test

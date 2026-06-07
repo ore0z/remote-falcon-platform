@@ -2,6 +2,7 @@ package com.remotefalcon.service;
 
 import com.remotefalcon.library.enums.ViewerControlMode;
 import com.remotefalcon.library.models.Preference;
+import com.remotefalcon.library.models.PsaSequence;
 import com.remotefalcon.library.models.Request;
 import com.remotefalcon.library.models.Sequence;
 import com.remotefalcon.library.models.SequenceGroup;
@@ -278,6 +279,237 @@ class GraphQLQueryServiceTest {
       when(showRepository.findPagesOnlyByShowSubdomain("sub")).thenReturn(Optional.of(show));
       String html = service.activeViewerPage("sub");
       assertEquals("", html);
+    }
+  }
+
+  // ---- PSA-v2 PR-4 — Q2 isSongLike skip predicate in updatePlayingNext ----
+
+  @Nested
+  @DisplayName("updatePlayingNext (PSA-v2 Q2 skip predicate)")
+  class PsaV2PlayingNextTests {
+
+    // Return a real Preference, not a mock: these helpers are evaluated INSIDE
+    // when(show.getPreferences()).thenReturn(jukeboxPrefs()), so stubbing inside
+    // a mock here starts a nested when() while the outer stubbing is still
+    // ongoing — Mockito throws UnfinishedStubbingException (and, since these
+    // classes don't use MockitoExtension, the dirty state leaks into the next
+    // test class). A plain builder is behaviorally identical here; only
+    // viewerControlMode is read by updatePlayingNext's skip predicate.
+    private Preference jukeboxPrefs() {
+      return Preference.builder().viewerControlMode(ViewerControlMode.JUKEBOX).build();
+    }
+
+    private Preference votingPrefs() {
+      return Preference.builder().viewerControlMode(ViewerControlMode.VOTING).build();
+    }
+
+    @Test
+    @DisplayName("Jukebox: PSA at front of queue is skipped, next song reported")
+    void jukeboxSkipsPsaAtFront() {
+      Show show = mockShowWithBasicCollections();
+      when(show.getPreferences()).thenReturn(jukeboxPrefs());
+      when(show.getPlayingNow()).thenReturn("");
+      when(show.getPsaSequences()).thenReturn(new ArrayList<>(List.of(
+          PsaSequence.builder().name("PSA1").build())));
+      when(show.getRequestLeaderSequence()).thenReturn(null);
+      when(show.getVoteLeaderSequence()).thenReturn(null);
+
+      Sequence psa = mockSequence("PSA1", "PSA One", 1, true, 0, null);
+      Sequence song = mockSequence("Song1", "Song One", 2, true, 0, null);
+      show.getSequences().add(psa);
+      show.getSequences().add(song);
+
+      Request psaReq = mock(Request.class);
+      when(psaReq.getPosition()).thenReturn(1);
+      when(psaReq.getSequence()).thenReturn(psa);
+      Request songReq = mock(Request.class);
+      when(songReq.getPosition()).thenReturn(2);
+      when(songReq.getSequence()).thenReturn(song);
+      show.getRequests().add(psaReq);
+      show.getRequests().add(songReq);
+
+      when(showRepository.findByShowSubdomainForViewer("sub")).thenReturn(Optional.of(show));
+
+      service.getShow("sub");
+
+      verify(show).setPlayingNext("Song One");
+      verify(show).setPlayingNextSequence(song);
+      verify(show, never()).setPlayingNext("PSA One");
+    }
+
+    @Test
+    @DisplayName("Jukebox: PSA-PSA-Song queue → reports the song after multi-skip")
+    void jukeboxMultiSkipPsas() {
+      Show show = mockShowWithBasicCollections();
+      when(show.getPreferences()).thenReturn(jukeboxPrefs());
+      when(show.getPlayingNow()).thenReturn("");
+      when(show.getPsaSequences()).thenReturn(new ArrayList<>(List.of(
+          PsaSequence.builder().name("PSA1").build(),
+          PsaSequence.builder().name("PSA2").build())));
+      when(show.getRequestLeaderSequence()).thenReturn(null);
+      when(show.getVoteLeaderSequence()).thenReturn(null);
+
+      Sequence song = mockSequence("Song1", "Song One", 1, true, 0, null);
+      show.getSequences().add(song);
+
+      // Build sequence mocks BEFORE the outer when() — calling a stubbing
+      // helper inside when(...).thenReturn(...) is a nested when()
+      // (UnfinishedStubbingException).
+      Sequence psa1Seq = mockSequence("PSA1", "PSA One", 0, true, 0, null);
+      Request psa1Req = mock(Request.class);
+      when(psa1Req.getPosition()).thenReturn(1);
+      when(psa1Req.getSequence()).thenReturn(psa1Seq);
+      Sequence psa2Seq = mockSequence("PSA2", "PSA Two", 0, true, 0, null);
+      Request psa2Req = mock(Request.class);
+      when(psa2Req.getPosition()).thenReturn(2);
+      when(psa2Req.getSequence()).thenReturn(psa2Seq);
+      Request songReq = mock(Request.class);
+      when(songReq.getPosition()).thenReturn(3);
+      when(songReq.getSequence()).thenReturn(song);
+      show.getRequests().add(psa1Req);
+      show.getRequests().add(psa2Req);
+      show.getRequests().add(songReq);
+
+      when(showRepository.findByShowSubdomainForViewer("sub")).thenReturn(Optional.of(show));
+
+      service.getShow("sub");
+
+      verify(show).setPlayingNext("Song One");
+      verify(show).setPlayingNextSequence(song);
+    }
+
+    @Test
+    @DisplayName("Jukebox: leader sequence at front is skipped, next song reported")
+    void jukeboxSkipsLeader() {
+      Show show = mockShowWithBasicCollections();
+      when(show.getPreferences()).thenReturn(jukeboxPrefs());
+      when(show.getPlayingNow()).thenReturn("");
+      when(show.getPsaSequences()).thenReturn(new ArrayList<>());
+      when(show.getRequestLeaderSequence()).thenReturn("ReqLeader");
+      when(show.getVoteLeaderSequence()).thenReturn(null);
+
+      Sequence song = mockSequence("Song1", "Song One", 1, true, 0, null);
+      show.getSequences().add(song);
+
+      Sequence leaderSeq = mockSequence("ReqLeader", "Request Leader", 0, true, 0, null);
+      Request leaderReq = mock(Request.class);
+      when(leaderReq.getPosition()).thenReturn(1);
+      when(leaderReq.getSequence()).thenReturn(leaderSeq);
+      Request songReq = mock(Request.class);
+      when(songReq.getPosition()).thenReturn(2);
+      when(songReq.getSequence()).thenReturn(song);
+      show.getRequests().add(leaderReq);
+      show.getRequests().add(songReq);
+
+      when(showRepository.findByShowSubdomainForViewer("sub")).thenReturn(Optional.of(show));
+
+      service.getShow("sub");
+
+      verify(show).setPlayingNext("Song One");
+      verify(show).setPlayingNextSequence(song);
+    }
+
+    @Test
+    @DisplayName("Voting mode: playingNextFromSchedule is a PSA → playingNext not set")
+    void votingModeScheduleIsPsa_doesNotLeakPsaName() {
+      // #56 — FPP reports a PSA in playingNextFromSchedule because FPP
+      // doesn't know what PSAs are. We must filter on the RF side.
+      Show show = mockShowWithBasicCollections();
+      when(show.getPreferences()).thenReturn(votingPrefs());
+      when(show.getPlayingNow()).thenReturn("");
+      when(show.getPsaSequences()).thenReturn(new ArrayList<>(List.of(
+          PsaSequence.builder().name("PSA1").build())));
+      when(show.getRequestLeaderSequence()).thenReturn(null);
+      when(show.getVoteLeaderSequence()).thenReturn(null);
+      when(show.getPlayingNextFromSchedule()).thenReturn("PSA1");
+
+      Sequence psaSeq = mockSequence("PSA1", "PSA Display", 1, true, 0, null);
+      show.getSequences().add(psaSeq);
+
+      when(showRepository.findByShowSubdomainForViewer("sub")).thenReturn(Optional.of(show));
+
+      service.getShow("sub");
+
+      // playingNext must NOT be updated to the PSA name.
+      verify(show, never()).setPlayingNext("PSA Display");
+      verify(show, never()).setPlayingNextSequence(psaSeq);
+      // ...and any stale value is cleared rather than left to leak (item 11).
+      verify(show).setPlayingNext("");
+    }
+
+    @Test
+    @DisplayName("Voting mode: playingNextFromSchedule is a regular song → reports that song")
+    void votingModeScheduleIsSong_reportsIt() {
+      Show show = mockShowWithBasicCollections();
+      when(show.getPreferences()).thenReturn(votingPrefs());
+      when(show.getPlayingNow()).thenReturn("");
+      when(show.getPsaSequences()).thenReturn(new ArrayList<>(List.of(
+          PsaSequence.builder().name("PSA1").build())));
+      when(show.getRequestLeaderSequence()).thenReturn(null);
+      when(show.getVoteLeaderSequence()).thenReturn(null);
+      when(show.getPlayingNextFromSchedule()).thenReturn("Song1");
+
+      Sequence song = mockSequence("Song1", "Song One", 1, true, 0, null);
+      show.getSequences().add(song);
+
+      when(showRepository.findByShowSubdomainForViewer("sub")).thenReturn(Optional.of(show));
+
+      service.getShow("sub");
+
+      verify(show).setPlayingNext("Song One");
+      verify(show).setPlayingNextSequence(song);
+    }
+
+    @Test
+    @DisplayName("Voting mode: playingNextFromSchedule is a leader → playingNext not set")
+    void votingModeScheduleIsLeader_doesNotLeakLeaderName() {
+      Show show = mockShowWithBasicCollections();
+      when(show.getPreferences()).thenReturn(votingPrefs());
+      when(show.getPlayingNow()).thenReturn("");
+      when(show.getPsaSequences()).thenReturn(new ArrayList<>());
+      when(show.getRequestLeaderSequence()).thenReturn(null);
+      when(show.getVoteLeaderSequence()).thenReturn("VoteLeader");
+      when(show.getPlayingNextFromSchedule()).thenReturn("VoteLeader");
+
+      Sequence leader = mockSequence("VoteLeader", "Vote Leader Display", 1, true, 0, null);
+      show.getSequences().add(leader);
+
+      when(showRepository.findByShowSubdomainForViewer("sub")).thenReturn(Optional.of(show));
+
+      service.getShow("sub");
+
+      verify(show, never()).setPlayingNext("Vote Leader Display");
+      verify(show, never()).setPlayingNextSequence(leader);
+      // Stale value cleared rather than left to leak (review item 11).
+      verify(show).setPlayingNext("");
+    }
+
+    @Test
+    @DisplayName("Jukebox: queue with only PSAs → falls through to schedule (PSA in schedule also filtered)")
+    void jukeboxAllPsaQueue_fallsThroughAndFiltersScheduledPsa() {
+      Show show = mockShowWithBasicCollections();
+      when(show.getPreferences()).thenReturn(jukeboxPrefs());
+      when(show.getPlayingNow()).thenReturn("");
+      when(show.getPsaSequences()).thenReturn(new ArrayList<>(List.of(
+          PsaSequence.builder().name("PSA1").build())));
+      when(show.getRequestLeaderSequence()).thenReturn(null);
+      when(show.getVoteLeaderSequence()).thenReturn(null);
+      when(show.getPlayingNextFromSchedule()).thenReturn("PSA1");
+
+      Sequence psa = mockSequence("PSA1", "PSA One", 1, true, 0, null);
+      show.getSequences().add(psa);
+      Request psaReq = mock(Request.class);
+      when(psaReq.getPosition()).thenReturn(1);
+      when(psaReq.getSequence()).thenReturn(psa);
+      show.getRequests().add(psaReq);
+
+      when(showRepository.findByShowSubdomainForViewer("sub")).thenReturn(Optional.of(show));
+
+      service.getShow("sub");
+
+      // Neither the queue scan nor the schedule fallback should surface the PSA.
+      verify(show, never()).setPlayingNext("PSA One");
+      verify(show, never()).setPlayingNextSequence(psa);
     }
   }
 }

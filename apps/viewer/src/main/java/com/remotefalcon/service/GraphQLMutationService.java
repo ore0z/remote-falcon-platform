@@ -5,6 +5,7 @@ import com.remotefalcon.library.enums.LocationCheckMethod;
 import com.remotefalcon.library.enums.StatusResponse;
 import com.remotefalcon.library.models.*;
 import com.remotefalcon.library.quarkus.entity.Show;
+import com.remotefalcon.library.util.PluginQueueHelper;
 import com.remotefalcon.metrics.ViewerMetrics;
 import com.remotefalcon.repository.ShowRepository;
 import com.remotefalcon.util.ClientUtil;
@@ -159,13 +160,30 @@ public class GraphQLMutationService {
       if (requestedSequence.isPresent()) {
         this.checkIfSequenceRequested(show.get(), requestedSequence.get());
 
+        // PSA-v2 PR-3 (Q6): leader sequence injection. If the show has a
+        // requestLeaderSequence configured and the named sequence exists in
+        // the FPP-synced sequence list, inject it at the lower position so
+        // the existing min-position dequeue plays the leader first, then
+        // the viewer's request. Leader is marked viewerRequested="LEADER"
+        // to mirror the PSA marker pattern. Same null/empty/missing-target
+        // handling as PSAs: silently fall through if leader can't play.
+        Optional<Sequence> leaderSequence = this.resolveRequestLeaderSequence(show.get());
+        // Don't inject the leader when the viewer requested the leader
+        // sequence itself — it would queue the same sequence twice
+        // back-to-back. Mirrors the vote-leader guard in plugins-api
+        // processWinningVote (PSA-v2 review item 9).
+        if (leaderSequence.isPresent()
+            && StringUtils.equalsIgnoreCase(leaderSequence.get().getName(), requestedSequence.get().getName())) {
+          leaderSequence = Optional.empty();
+        }
+
         // Build request and stat
         long nextPosition = this.showRepository.nextRequestPosition(existingShow);
         Request request = Request.builder()
             .sequence(requestedSequence.get())
             .ownerRequested(false)
             .viewerRequested(StringUtils.isEmpty(clientIp) ? "" : clientIp)
-            .position(Math.toIntExact(nextPosition))
+            .position(Math.toIntExact(leaderSequence.isPresent() ? nextPosition + 1 : nextPosition))
             .build();
         Stat.Jukebox jukeboxStat = Stat.Jukebox.builder()
             .dateTime(LocalDateTime.now())
@@ -173,8 +191,21 @@ public class GraphQLMutationService {
             .viewerId(viewerId)
             .build();
 
-        // Batched write: single DB call for both request and stat
-        this.showRepository.appendRequestAndJukeboxStat(showSubdomain, request, jukeboxStat);
+        if (leaderSequence.isPresent()) {
+          // Leader gets the lower position so min-position dequeue plays it first.
+          Request leaderRequest = Request.builder()
+              .sequence(leaderSequence.get())
+              .ownerRequested(false)
+              .viewerRequested("LEADER")
+              .position(Math.toIntExact(nextPosition))
+              .build();
+          // Batched write: single DB call for both rows + the (viewer-named) stat.
+          this.showRepository.appendMultipleRequestsAndJukeboxStat(
+              showSubdomain, List.of(leaderRequest, request), jukeboxStat);
+        } else {
+          // Batched write: single DB call for both request and stat
+          this.showRepository.appendRequestAndJukeboxStat(showSubdomain, request, jukeboxStat);
+        }
 
         // Bump session window so the request counts toward dwell tracking
         try {
@@ -187,6 +218,12 @@ public class GraphQLMutationService {
         if (show.get().getRequests() == null) {
           show.get().setRequests(new ArrayList<>());
         }
+        leaderSequence.ifPresent(seq -> show.get().getRequests().add(Request.builder()
+            .sequence(seq)
+            .ownerRequested(false)
+            .viewerRequested("LEADER")
+            .position(Math.toIntExact(nextPosition))
+            .build()));
         show.get().getRequests().add(request);
 
         // Handle PSA if needed (calculate inline without re-fetching)
@@ -347,11 +384,19 @@ public class GraphQLMutationService {
   }
 
   private Boolean isQueueFull(Show show) {
-    if (CollectionUtils.isNotEmpty(show.getRequests())) {
-      return show.getPreferences().getJukeboxDepth() != 0
-          && show.getRequests().size() >= show.getPreferences().getJukeboxDepth();
+    // PSA-v2 Q3 (#49) — count only viewer-initiated requests against
+    // jukeboxDepth. PSAs and leader sequences (operator-policy injects)
+    // bypass the cap entirely: they're not viewer demand and shouldn't
+    // compete with viewers for the slots the setting is meant to govern.
+    // Previous behavior counted everything in the requests array, which
+    // silently halved viewer capacity at steady state when PSAs were
+    // interleaved (e.g., jukeboxDepth=5 + psaFrequency=3 produced ~2
+    // PSAs + ~3 viewer slots).
+    if (show.getPreferences().getJukeboxDepth() == null
+        || show.getPreferences().getJukeboxDepth() == 0) {
+      return false;
     }
-    return false;
+    return PluginQueueHelper.countViewerRequests(show) >= show.getPreferences().getJukeboxDepth();
   }
 
   private Boolean isViewerPresent(Show show, Float latitude, Float longitude) {
@@ -420,7 +465,14 @@ public class GraphQLMutationService {
 
   private Boolean isRequestedSequenceWithinRequestLimit(Show show, Sequence requestedSequence) {
     if (show.getPreferences().getJukeboxRequestLimit() != 0) {
+      // Count only viewer song requests in the "last N" dedup window.
+      // Operator-injected rows (PSAs, leaders, overrides) must not consume
+      // window slots, or a real recent request falls out of the window and
+      // becomes re-requestable (PSA-v2 review item 10). isSongLike excludes
+      // PSA/leader names — the same predicate isQueueFull uses.
       List<String> requestNamesLastToFirst = show.getRequests().stream()
+          .filter(request -> request.getSequence() != null
+              && PluginQueueHelper.isSongLike(show, request.getSequence().getName()))
           .sorted(Comparator.comparing(Request::getPosition)
               .reversed())
           .limit(show.getPreferences().getJukeboxRequestLimit())
@@ -446,12 +498,43 @@ public class GraphQLMutationService {
     show.getRequests().add(request);
   }
 
+  /**
+   * PSA-v2 PR-3 (Q6): resolves the configured request-leader sequence to a
+   * playable {@link Sequence}. Returns empty when:
+   * <ul>
+   *   <li>the show has no {@code requestLeaderSequence} configured
+   *       (null or blank — admin cleared the field), or</li>
+   *   <li>the configured name doesn't match any sequence in
+   *       {@code show.getSequences()} (FPP-synced source of truth) — same
+   *       silent-skip semantics PSAs use when their target sequence is missing
+   *       from FPP.</li>
+   * </ul>
+   */
+  private Optional<Sequence> resolveRequestLeaderSequence(Show show) {
+    String leaderName = show.getRequestLeaderSequence();
+    if (StringUtils.isBlank(leaderName) || CollectionUtils.isEmpty(show.getSequences())) {
+      return Optional.empty();
+    }
+    return show.getSequences().stream()
+        .filter(seq -> StringUtils.equalsIgnoreCase(seq.getName(), leaderName))
+        .findFirst();
+  }
+
   private void handlePsaForJukeboxInline(String showSubdomain, Show show, int requestsMadeToday) {
     // Inline PSA handling that doesn't require re-fetching show
     if (requestsMadeToday % show.getPreferences().getPsaFrequency() == 0) {
+      // Honor the Q1 enabled toggle (review item 7): a PSA soft-disabled via
+      // the Special Roles tab must not be injected in unmanaged jukebox mode,
+      // matching the managed path's enabled filter. nullsFirst on lastPlayed
+      // (review item 14) treats a never-played PSA as highest priority instead
+      // of NPEing, and the null-safe order/name tie-break mirrors
+      // handlePsaRoundRobin so all PSA pickers order identically.
       Optional<PsaSequence> nextPsaSequence = show.getPsaSequences().stream()
-          .min(Comparator.comparing(PsaSequence::getLastPlayed)
-              .thenComparing(PsaSequence::getOrder));
+          .filter(psa -> psa != null && !Boolean.FALSE.equals(psa.getEnabled()))
+          .min(Comparator
+              .comparing(PsaSequence::getLastPlayed, Comparator.nullsFirst(Comparator.naturalOrder()))
+              .thenComparing(psa -> psa.getOrder() != null ? psa.getOrder() : Integer.MAX_VALUE)
+              .thenComparing(psa -> psa.getName() != null ? psa.getName() : ""));
       if (nextPsaSequence.isPresent()) {
         Optional<Sequence> sequenceToAdd = show.getSequences().stream()
             .filter(sequence -> StringUtils.equalsIgnoreCase(sequence.getName(), nextPsaSequence.get().getName()))
