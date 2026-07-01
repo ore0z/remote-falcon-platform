@@ -47,6 +47,7 @@ services:
     build:
       context: ../..
       dockerfile: apps/control-panel/Dockerfile.dev
+      network: host
     restart: unless-stopped
     ports:
       - "8081:8080"
@@ -69,6 +70,7 @@ services:
     build:
       context: ../..
       dockerfile: apps/viewer/Dockerfile.dev
+      network: host
     restart: unless-stopped
     ports:
       - "8082:8080"
@@ -89,6 +91,7 @@ services:
     build:
       context: ../..
       dockerfile: apps/plugins-api/Dockerfile.dev
+      network: host
     restart: unless-stopped
     ports:
       - "8083:8080"
@@ -108,6 +111,7 @@ services:
   ui:
     build:
       context: ../../apps/ui
+      network: host
       args:
         HOST_ENV: prod
         VERSION: ${VERSION:-self-host}
@@ -150,6 +154,11 @@ services:
       - viewer
 
   nginx:
+    # This deployment uses the host's nginx instead of the containerized one.
+    # `profiles: ["disabled"]` keeps this service definition available (it can
+    # be brought up with `docker-compose --profile disabled up nginx`) but
+    # excludes it from the default `docker-compose up`.
+    profiles: ["disabled"]
     image: nginx:alpine
     restart: unless-stopped
     ports:
